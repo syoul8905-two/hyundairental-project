@@ -2866,12 +2866,20 @@
       showToast(prevVeh ? `🚫 [${prevVeh}] 차량 선택이 취소되었습니다.` : '🚫 차량 선택이 취소되었습니다.');
     }
 
+    var _isSyncingTodayVehicleLog = {};
+
     async function syncTodayScheduleToVehicleLog(vNo) {
       if (!vNo || vNo === '자차' || vNo === '자차운행') return;
       // 기사님이 오늘 차량을 명시적으로 확정(선택)하지 않은 상태(보기 모드)라면 일지 자동 작성 방지
       if (!isVehicleConfirmedForToday() || currentMobileVehicleNo !== vNo) {
         return;
       }
+      // 동시성 락(Concurrency Lock): 동일 차량에 대해 동시 다발적 sync 호출 방지
+      if (_isSyncingTodayVehicleLog[vNo]) {
+        return;
+      }
+      _isSyncingTodayVehicleLog[vNo] = true;
+
       try {
         var veh = mobileVehiclesMaster.find(function(v) { return v.vehicle_no === vNo; }) || {};
         var drvName = getCurrentDriverName() || veh.default_driver || '조경찬';
@@ -2943,20 +2951,48 @@
 
         if (supabaseClient) {
           var checkRes = await supabaseClient.from('delivery_schedules')
-            .select('*')
+            .select('id, memo_full, status')
             .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
             .eq('customer_name', vNo)
             .eq('delivery_date', currentDate)
-            .limit(1);
+            .order('id', { ascending: false });
 
           var existingPayload = {};
-          var rowId = null;
+          var primaryRowId = null;
+          var dupIdsToDelete = [];
+
           if (checkRes.data && checkRes.data.length > 0) {
-            rowId = checkRes.data[0].id;
-            try { existingPayload = JSON.parse(checkRes.data[0].memo_full || '{}'); } catch(e) {}
-            // 이미 오늘 하루 일과가 끝나 운행 마감된 일지라면 마감 데이터(stops, Km, 상태)를 보존
-            if (existingPayload.is_closed === true || checkRes.data[0].status === '운행마감') {
+            // 이미 마감된 레코드가 있는지 먼저 확인
+            var closedRow = checkRes.data.find(function(r) {
+              if (r.status === '운행마감' || r.status === '마감') return true;
+              try {
+                var p = JSON.parse(r.memo_full || '{}');
+                if (p.is_closed === true) return true;
+              } catch(e) {}
+              return false;
+            });
+
+            if (closedRow) {
+              // 이미 오늘 하루 일과가 끝나 운행 마감된 일지라면 마감 데이터 보존 및 잉여 미마감 초안 행 삭제
+              checkRes.data.forEach(function(r) {
+                if (r.id !== closedRow.id) {
+                  var isRowClosed = (r.status === '운행마감' || r.status === '마감');
+                  try { var p = JSON.parse(r.memo_full || '{}'); if (p.is_closed === true) isRowClosed = true; } catch(e) {}
+                  if (!isRowClosed) dupIdsToDelete.push(r.id);
+                }
+              });
+              if (dupIdsToDelete.length > 0) {
+                await supabaseClient.from('delivery_schedules').delete().in('id', dupIdsToDelete);
+              }
               return;
+            }
+
+            // 마감되지 않은 레코드 중 최신 ID를 primary로 지정하고 나머지는 중복 정리 대상
+            primaryRowId = checkRes.data[0].id;
+            try { existingPayload = JSON.parse(checkRes.data[0].memo_full || '{}'); } catch(e) {}
+
+            if (checkRes.data.length > 1) {
+              dupIdsToDelete = checkRes.data.slice(1).map(function(r) { return r.id; });
             }
           }
 
@@ -2977,7 +3013,7 @@
             is_unoperated: false // 기사님이 차량을 선택하여 운행하므로 미운행 상태 자동 해제!
           });
 
-          if (rowId) {
+          if (primaryRowId) {
             await supabaseClient.from('delivery_schedules')
               .update({
                 driver_name: drvName,
@@ -2985,7 +3021,7 @@
                 memo_special: null,
                 memo_full: JSON.stringify(mergedPayload)
               })
-              .eq('id', rowId);
+              .eq('id', primaryRowId);
           } else {
             await supabaseClient.from('delivery_schedules').insert([{
               customer_name: vNo,
@@ -2997,9 +3033,15 @@
               memo_full: JSON.stringify(mergedPayload)
             }]);
           }
+
+          if (dupIdsToDelete.length > 0) {
+            await supabaseClient.from('delivery_schedules').delete().in('id', dupIdsToDelete);
+          }
         }
       } catch(err) {
         console.warn('Error syncing schedule to vehicle log:', err);
+      } finally {
+        _isSyncingTodayVehicleLog[vNo] = false;
       }
     }
 
@@ -3172,6 +3214,7 @@
             .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
             .eq('customer_name', vNo)
             .eq('delivery_date', currentDate)
+            .order('id', { ascending: false })
             .limit(1);
           if (res.data && res.data.length > 0 && res.data[0].memo_full) {
             var parsed = JSON.parse(res.data[0].memo_full);
@@ -3541,14 +3584,38 @@
 
       try {
         if (supabaseClient) {
+          // 동시성 방어 및 중복 방지: 해당 차량과 날짜의 모든 일지 조회
           var checkRes = await supabaseClient.from('delivery_schedules')
-            .select('id')
+            .select('id, memo_full, status')
             .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
             .eq('customer_name', veh.vehicle_no)
             .eq('delivery_date', currentDate)
-            .limit(1);
+            .order('id', { ascending: false });
+
+          var primaryRowId = null;
+          var dupIdsToDelete = [];
 
           if (checkRes.data && checkRes.data.length > 0) {
+            // 이미 마감된 레코드가 있다면 해당 레코드를 우선 타깃팅, 아니면 최신 ID 타깃팅
+            var closedIdx = checkRes.data.findIndex(function(r) {
+              if (r.status === '운행마감' || r.status === '마감') return true;
+              try { var p = JSON.parse(r.memo_full || '{}'); if (p.is_closed) return true; } catch(e) {}
+              return false;
+            });
+            var targetIdx = closedIdx !== -1 ? closedIdx : 0;
+            primaryRowId = checkRes.data[targetIdx].id;
+
+            // 선별된 1건 외의 나머지 중복 행 중 미마감 초안만 삭제 대상에 추가 (기존 마감 기록 보존)
+            checkRes.data.forEach(function(r, idx) {
+              if (idx !== targetIdx) {
+                var isRowClosed = (r.status === '운행마감' || r.status === '마감');
+                try { var p = JSON.parse(r.memo_full || '{}'); if (p.is_closed === true) isRowClosed = true; } catch(e) {}
+                if (!isRowClosed) dupIdsToDelete.push(r.id);
+              }
+            });
+          }
+
+          if (primaryRowId) {
             await supabaseClient.from('delivery_schedules')
               .update({
                 driver_name: drvName,
@@ -3556,7 +3623,7 @@
                 memo_special: JSON.stringify({ arrive: nowTimeStr }),
                 memo_full: JSON.stringify(logPayload)
               })
-              .eq('id', checkRes.data[0].id);
+              .eq('id', primaryRowId);
           } else {
             await supabaseClient.from('delivery_schedules').insert([{
               customer_name: veh.vehicle_no,
@@ -3567,6 +3634,11 @@
               memo_special: JSON.stringify({ arrive: nowTimeStr }),
               memo_full: JSON.stringify(logPayload)
             }]);
+          }
+
+          // 잉여 중복 행이 존재할 경우 일괄 삭제 정리
+          if (dupIdsToDelete.length > 0) {
+            await supabaseClient.from('delivery_schedules').delete().in('id', dupIdsToDelete);
           }
 
           veh.current_km = endKm;

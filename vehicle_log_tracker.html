@@ -1786,11 +1786,20 @@
             .order('delivery_date', { ascending: true });
 
           if (res.data) {
-            tripLogs = res.data.map(function(row) {
+            // ────────────────────────────────────────────────────────────────
+            // [방어적 중복 병합/정리] 동일 차량·동일 날짜 일지 중복 발생 시 자동 정제
+            // ────────────────────────────────────────────────────────────────
+            var rawLogs = res.data || [];
+            var groupedByDate = {};
+            var duplicateGarbageIds = [];
+
+            rawLogs.forEach(function(row) {
               var parsed = {};
               try { parsed = JSON.parse(row.memo_full || '{}'); } catch(e) {}
               var normVehNo = (row.customer_name === '801라8744' ? '801부8744' : row.customer_name) || currentSelectedVehicleNo;
-              return {
+              var dateKey = (row.delivery_date || '') + '___' + normVehNo;
+
+              var item = {
                 id: row.id,
                 vehicle_no: normVehNo,
                 trip_date: row.delivery_date,
@@ -1813,9 +1822,64 @@
                   if (sName.startsWith('SYSTEM_CONFIG') || sId.includes('HANDOVER') || sId.includes('1356') || sId.includes('1357') || sId.includes('1358') || sId.includes('1359')) return false;
                   return true;
                 }),
-                memo: parsed.memo || ''
+                memo: parsed.memo || '',
+                status: row.status || ''
               };
+
+              if (!groupedByDate[dateKey]) {
+                groupedByDate[dateKey] = item;
+              } else {
+                // 중복 감지: 최적의 정상 일지 1건 선별
+                var existing = groupedByDate[dateKey];
+                var pickNew = false;
+
+                // 1순위: 마감된 일지(is_closed) 우선
+                if (item.is_closed && !existing.is_closed) {
+                  pickNew = true;
+                } else if (!item.is_closed && existing.is_closed) {
+                  pickNew = false;
+                }
+                // 2순위: 실주행 거리(distance_km)가 더 큰 건 우선
+                else if (item.distance_km > existing.distance_km) {
+                  pickNew = true;
+                } else if (item.distance_km < existing.distance_km) {
+                  pickNew = false;
+                }
+                // 3순위: 더 최근 레코드(ID가 더 큰 건) 우선
+                else if (item.id > existing.id) {
+                  pickNew = true;
+                }
+
+                var discarded = pickNew ? existing : item;
+                var kept = pickNew ? item : existing;
+
+                // [안전 가드] 마감된 정상 일지가 존재할 때 남겨진 '미마감 0km 고스트 초안'인 경우에만 DB 자동 정리 대상으로 선별 (실제 주행 기록 보존)
+                if (kept.is_closed && !discarded.is_closed && discarded.distance_km === 0) {
+                  duplicateGarbageIds.push(discarded.id);
+                }
+
+                if (pickNew) {
+                  groupedByDate[dateKey] = item;
+                }
+              }
             });
+
+            // 단일화된 정제 일지 목록 생성 (날짜순 정렬)
+            tripLogs = Object.values(groupedByDate).sort(function(a, b) {
+              return (a.trip_date || '').localeCompare(b.trip_date || '');
+            });
+
+            // 잉여 중복 초안이 발견되었다면 백그라운드에서 DB 자동 삭제 정리
+            if (duplicateGarbageIds.length > 0 && supabaseClient) {
+              console.warn('🧹 중복 운행일지 감지 및 자동 정리 대상:', duplicateGarbageIds);
+              supabaseClient.from('delivery_schedules')
+                .delete()
+                .in('id', duplicateGarbageIds)
+                .then(function(delRes) {
+                  if (delRes.error) console.warn('중복 일지 삭제 경고:', delRes.error);
+                  else console.log('✅ 중복 운행일지 찌꺼기 ' + duplicateGarbageIds.length + '건 자동 정리 완료');
+                });
+            }
 
             // ────────────────────────────────────────────────────────────────
             // [실시간 연동] 당월 배송 스케줄에서 출발·도착 시각 및 주소 자동 동기화
@@ -3985,7 +4049,27 @@
 
       try {
         if (supabaseClient) {
-          if (logId) {
+          var targetId = logId ? Number(logId) : null;
+          if (!targetId) {
+            // [방어적 중복 방지] logId가 비어있더라도 해당 차량·날짜에 일지가 이미 존재하는지 사전 확인
+            var checkExisting = await supabaseClient.from('delivery_schedules')
+              .select('id')
+              .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
+              .eq('customer_name', vehicleNo)
+              .eq('delivery_date', tripDate)
+              .order('id', { ascending: false });
+
+            if (checkExisting && checkExisting.data && checkExisting.data.length > 0) {
+              targetId = checkExisting.data[0].id;
+              // 잉여 중복 건이 있을 경우 함께 정리
+              if (checkExisting.data.length > 1) {
+                var dupIds = checkExisting.data.slice(1).map(function(r) { return r.id; });
+                await supabaseClient.from('delivery_schedules').delete().in('id', dupIds);
+              }
+            }
+          }
+
+          if (targetId) {
             // Update
             await supabaseClient.from('delivery_schedules')
               .update({
@@ -3993,7 +4077,7 @@
                 driver_name: driverName,
                 memo_full: JSON.stringify(logPayload)
               })
-              .eq('id', logId);
+              .eq('id', targetId);
           } else {
             // Insert
             await supabaseClient.from('delivery_schedules').insert([{
@@ -4008,7 +4092,7 @@
           // Recalibrate vehicleMaster current_km to match the true latest odometer
           var vIdx = vehiclesMaster.findIndex(function(v) { return v.vehicle_no === vehicleNo; });
           if (vIdx !== -1) {
-            var allOtherLogs = tripLogs.filter(function(l) { return l.vehicle_no === vehicleNo && (logId ? l.id !== Number(logId) : true); });
+            var allOtherLogs = tripLogs.filter(function(l) { return l.vehicle_no === vehicleNo && (targetId ? l.id !== Number(targetId) : true); });
             var maxEnd = endKm;
             allOtherLogs.forEach(function(l) {
               if (l.end_km > maxEnd) maxEnd = l.end_km;
