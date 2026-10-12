@@ -27,6 +27,7 @@
     .category-badge-phone { background-color: #faf5ff; color: #7e22ce; border: 1px solid #e9d5ff; }
     .category-badge-onsite { background-color: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
     .category-badge-inhouse { background-color: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+    .category-badge-replace { background-color: #f0fdfa; color: #0f766e; border: 1px solid #99f6e4; }
     
     .tab-active { background-color: #4f46e5; color: #ffffff; }
     .tab-inactive { background-color: #f1f5f9; color: #64748b; }
@@ -99,7 +100,7 @@
   <!-- ========================================== -->
   <!-- 2. KPI Summary Cards                       -->
   <!-- ========================================== -->
-  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+  <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3 mb-4">
     <!-- Total Records -->
     <div class="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs flex items-center justify-between">
       <div>
@@ -150,6 +151,16 @@
         <i class="fa-solid fa-boxes-packing"></i>
       </div>
     </div>
+    <!-- Equipment Replacement (장비교체) -->
+    <div class="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs flex items-center justify-between">
+      <div>
+        <p class="text-[11px] font-bold text-teal-600">🔄 장비교체</p>
+        <h3 id="kpiReplaceCount" class="text-xl font-black text-teal-900 mt-0.5">0건</h3>
+      </div>
+      <div class="w-10 h-10 rounded-xl bg-teal-50 flex items-center justify-center text-teal-600 text-base">
+        <i class="fa-solid fa-arrows-rotate"></i>
+      </div>
+    </div>
     <!-- Pending / Processing -->
     <div class="bg-white rounded-2xl p-3.5 border border-slate-200 shadow-xs flex items-center justify-between">
       <div>
@@ -189,11 +200,23 @@
 
         <input type="hidden" id="editRecordId" value="">
 
-        <!-- Contract No & Asset No Row -->
-        <div class="grid grid-cols-2 gap-2.5 mb-2.5">
+        <!-- [1단계] 고객사 및 계약 식별 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
+          <!-- Customer Name -->
+          <div class="relative">
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">
+              고객사명 <span class="text-rose-500">*</span>
+            </label>
+            <input type="text" id="inputCustomerName" placeholder="고객사 상호 입력 (예: (주)인투온)" 
+                   oninput="onCustomerInput(this.value)"
+                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
+            <!-- Customer Autocomplete Dropdown -->
+            <div id="customerDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto custom-scroll"></div>
+          </div>
+
           <!-- Contract No -->
           <div class="relative">
-            <label class="block text-[11px] font-bold text-slate-600 mb-1">
+            <label class="block text-[11px] font-bold text-slate-700 mb-1">
               계약번호 <span class="text-rose-500">*</span>
             </label>
             <div class="relative">
@@ -209,19 +232,10 @@
             <!-- Contract Autocomplete Dropdown -->
             <div id="contractDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto custom-scroll"></div>
           </div>
-
-          <!-- Asset No -->
-          <div>
-            <label class="block text-[11px] font-bold text-slate-600 mb-1">
-              자산번호
-            </label>
-            <input type="text" id="inputAssetNo" placeholder="예: PR-2024-001" 
-                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
-          </div>
         </div>
 
         <!-- Contract Unified History Summary Banner (Appears when contract is recognized) -->
-        <div id="contractHistoryBanner" class="hidden mb-2.5 p-2 bg-indigo-50/80 rounded-xl border border-indigo-200 text-[11px] flex items-center justify-between">
+        <div id="contractHistoryBanner" class="hidden mb-2 p-2 bg-indigo-50/80 rounded-xl border border-indigo-200 text-[11px] flex items-center justify-between">
           <div class="flex items-center gap-1.5 text-indigo-900 font-bold truncate">
             <i class="fa-solid fa-clock-rotate-left text-indigo-600"></i>
             <span id="contractBannerText">과거 배송 1건, A/S 2건 기록 있음</span>
@@ -229,18 +243,6 @@
           <button type="button" onclick="openContractTimelineModal(document.getElementById('inputContractNo').value)" class="text-indigo-700 hover:text-indigo-950 font-black underline shrink-0 text-[10px]">
             타임라인 ↗
           </button>
-        </div>
-
-        <!-- Customer Name -->
-        <div class="mb-2.5 relative">
-          <label class="block text-[11px] font-bold text-slate-600 mb-1">
-            고객사명 <span class="text-rose-500">*</span>
-          </label>
-          <input type="text" id="inputCustomerName" placeholder="고객사 상호 입력 (예: (주)인투온)" 
-                 oninput="onCustomerInput(this.value)"
-                 class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
-          <!-- Customer Autocomplete Dropdown -->
-          <div id="customerDropdown" class="hidden absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl z-50 max-h-48 overflow-y-auto custom-scroll"></div>
         </div>
 
         <!-- Customer Handover Card (Always accessible for customer) -->
@@ -257,6 +259,27 @@
           <div id="handoverCustContent" class="text-slate-700 text-[11px] leading-relaxed whitespace-pre-line font-medium">
             고객사를 선택하면 해당 거래처의 인수인계 사항이 여기에 표시됩니다.
           </div>
+        </div>
+
+        <!-- [2단계] 처리 대상 자산번호 (스마트 태그 칩 입력기) -->
+        <div class="mb-2.5 p-2.5 bg-slate-50/70 rounded-xl border border-slate-200/80">
+          <div class="flex items-center justify-between mb-1.5">
+            <label class="block text-[11px] font-black text-slate-700 flex items-center gap-1">
+              <i class="fa-solid fa-tags text-indigo-600 text-[10px]"></i>
+              <span>처리 대상 자산번호</span>
+              <span class="text-slate-400 font-normal text-[10px]">(복수 등록 / 엑셀 복붙 가능)</span>
+            </label>
+            <span id="assetCountBadge" class="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600">0대</span>
+          </div>
+          <div id="assetTagsContainer" onclick="focusAssetTagInput()" class="min-h-[38px] p-1.5 bg-white border border-slate-200 rounded-xl flex flex-wrap items-center gap-1.5 focus-within:border-indigo-500 focus-within:ring-2 focus-within:ring-indigo-100 transition cursor-text">
+            <div id="assetChipsList" class="flex flex-wrap items-center gap-1.5"></div>
+            <input type="text" id="inputAssetTag" placeholder="자산번호 입력 후 Enter / 쉼표 (엑셀 복붙 지원)" 
+                   onkeydown="handleAssetTagKeydown(event)" 
+                   onpaste="handleAssetTagPaste(event)"
+                   onblur="flushAssetTagInput()"
+                   class="flex-1 min-w-[160px] bg-transparent border-none text-xs font-bold text-slate-800 placeholder-slate-400 focus:outline-none uppercase">
+          </div>
+          <input type="hidden" id="inputAssetNo" value="">
         </div>
 
         <!-- Symptom -->
@@ -289,7 +312,7 @@
           <label class="block text-[11px] font-bold text-slate-600 mb-1">
             처리 구분 <span class="text-rose-500">*</span>
           </label>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+          <div class="grid grid-cols-2 sm:grid-cols-5 gap-1.5">
             <button type="button" onclick="selectCategory('원격지원')" id="catBtnRemote" class="py-1.5 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 bg-blue-50 border-blue-300 text-blue-800 shadow-xs">
               <i class="fa-solid fa-network-wired"></i> 원격지원
             </button>
@@ -302,8 +325,37 @@
             <button type="button" onclick="selectCategory('입고수리')" id="catBtnInhouse" class="py-1.5 px-2 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1 bg-slate-50 border-slate-200 text-slate-600 hover:bg-emerald-50">
               <i class="fa-solid fa-boxes-packing"></i> 입고수리
             </button>
+            <button type="button" onclick="selectCategory('장비교체')" id="catBtnReplace" class="py-1.5 px-2 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1 bg-slate-50 border-slate-200 text-slate-600 hover:bg-teal-50">
+              <i class="fa-solid fa-arrows-rotate"></i> 장비교체
+            </button>
           </div>
           <input type="hidden" id="inputCategory" value="원격지원">
+        </div>
+
+        <!-- [장비교체 전용] 1:1 교체 장비 매핑 및 건별 교체일자 섹션 -->
+        <div id="replacementMappingSection" class="hidden mb-2.5 p-2.5 bg-teal-50/80 rounded-xl border border-teal-200 transition">
+          <div class="flex items-center justify-between mb-1.5 flex-wrap gap-1">
+            <label class="block text-[11px] font-black text-teal-900 flex items-center gap-1.5">
+              <i class="fa-solid fa-arrows-rotate text-teal-600 text-[10px]"></i>
+              <span>교체 장비(신규 자산) 및 건별 교체일자 매핑</span>
+            </label>
+            <div class="flex items-center gap-1.5">
+              <span id="replacementMappingCount" class="text-[10px] text-teal-700 font-bold bg-teal-100 px-1.5 py-0.5 rounded-full">0건 매핑</span>
+              <button type="button" onclick="applyBatchReplacementDate()" class="px-2 py-0.5 bg-white hover:bg-teal-100 text-teal-800 rounded font-bold text-[10px] border border-teal-200 transition shadow-2xs" title="1번 교체일(또는 처리일)을 모든 장비에 일괄 적용">
+                <i class="fa-regular fa-calendar-check text-[9px]"></i> 일괄 날짜적용
+              </button>
+            </div>
+          </div>
+          <p class="text-[10px] text-teal-700 mb-2 leading-relaxed">
+            상단 처리 대상 자산번호별로 교체 투입된 신규 자산번호와 실제 교체일을 입력하세요.
+          </p>
+          <div id="replacementMappingList" class="space-y-1.5 mb-2">
+            <!-- Dynamic Rows rendered here -->
+          </div>
+          <button type="button" onclick="autoAppendReplacementsToMemo()" class="w-full py-1.5 bg-white hover:bg-teal-100 text-teal-900 rounded-lg text-[10.5px] font-bold border border-teal-200 transition flex items-center justify-center gap-1 shadow-2xs">
+            <i class="fa-solid fa-file-pen text-teal-600"></i>
+            <span>메모에 교체 내역 자동 반영</span>
+          </button>
         </div>
 
         <!-- Status, Receipt Date, Processed Date & Driver Row -->
@@ -415,6 +467,7 @@
             <button onclick="setCategoryFilter('유선안내')" id="filterCatPhone" class="px-2.5 py-1 rounded-lg font-bold text-[11px] tab-inactive transition">📞 유선안내</button>
             <button onclick="setCategoryFilter('현장방문')" id="filterCatOnsite" class="px-2.5 py-1 rounded-lg font-bold text-[11px] tab-inactive transition">🚗 현장방문</button>
             <button onclick="setCategoryFilter('입고수리')" id="filterCatInhouse" class="px-2.5 py-1 rounded-lg font-bold text-[11px] tab-inactive transition">📦 입고수리</button>
+            <button onclick="setCategoryFilter('장비교체')" id="filterCatReplace" class="px-2.5 py-1 rounded-lg font-bold text-[11px] tab-inactive transition">🔄 장비교체</button>
           </div>
 
           <!-- Status Filter Pills -->
@@ -756,6 +809,7 @@
       var phone = 0;
       var onsite = 0;
       var inhouse = 0;
+      var replace = 0;
       var pending = 0;
 
       asRecords.forEach(function(r) {
@@ -763,6 +817,7 @@
         else if (r.category === '유선안내') phone++;
         else if (r.category === '현장방문') onsite++;
         else if (r.category === '입고수리') inhouse++;
+        else if (r.category === '장비교체') replace++;
 
         if (r.status === '접수대기' || r.status === '처리중') pending++;
       });
@@ -774,6 +829,9 @@
       if (document.getElementById('kpiInhouseCount')) {
         document.getElementById('kpiInhouseCount').textContent = inhouse + '건';
       }
+      if (document.getElementById('kpiReplaceCount')) {
+        document.getElementById('kpiReplaceCount').textContent = replace + '건';
+      }
       document.getElementById('kpiPendingCount').textContent = pending + '건';
     }
 
@@ -784,9 +842,10 @@
       var bPhone = document.getElementById('catBtnPhone');
       var bOnsite = document.getElementById('catBtnOnsite');
       var bInhouse = document.getElementById('catBtnInhouse');
+      var bReplace = document.getElementById('catBtnReplace');
 
       // Reset
-      [bRemote, bPhone, bOnsite, bInhouse].forEach(function(b) {
+      [bRemote, bPhone, bOnsite, bInhouse, bReplace].forEach(function(b) {
         if (b) b.className = 'py-1.5 px-2 rounded-xl font-bold text-xs border transition flex items-center justify-center gap-1 bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100';
       });
 
@@ -798,7 +857,337 @@
         bOnsite.className = 'py-1.5 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 bg-orange-50 border-orange-300 text-orange-800 shadow-xs';
       } else if (cat === '입고수리' && bInhouse) {
         bInhouse.className = 'py-1.5 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 bg-emerald-50 border-emerald-300 text-emerald-800 shadow-xs';
+      } else if (cat === '장비교체' && bReplace) {
+        bReplace.className = 'py-1.5 px-2 rounded-xl font-black text-xs border transition flex items-center justify-center gap-1 bg-teal-50 border-teal-300 text-teal-800 shadow-xs';
       }
+
+      var mappingSec = document.getElementById('replacementMappingSection');
+      if (cat === '장비교체') {
+        if (mappingSec) mappingSec.classList.remove('hidden');
+        renderReplacementMapping();
+      } else {
+        if (mappingSec) mappingSec.classList.add('hidden');
+      }
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // [장비교체 1:1 자산 매핑 & 건별 교체일자 엔진]
+    // ────────────────────────────────────────────────────────────────
+    // Data store: { "OLD_ASSET": { newAsset: "NEW_ASSET", date: "YYYY-MM-DD" } }
+    var currentReplacements = {};
+
+    function captureCurrentReplacementsFromInputs() {
+      var newInputs = document.querySelectorAll('.replacement-new-input');
+      newInputs.forEach(function(inp) {
+        var oldAsset = inp.getAttribute('data-old-asset');
+        if (oldAsset) {
+          if (!currentReplacements[oldAsset]) currentReplacements[oldAsset] = {};
+          currentReplacements[oldAsset].newAsset = (inp.value || '').trim().toUpperCase();
+        }
+      });
+
+      var dateInputs = document.querySelectorAll('.replacement-date-input');
+      dateInputs.forEach(function(inp) {
+        var oldAsset = inp.getAttribute('data-old-asset');
+        if (oldAsset) {
+          if (!currentReplacements[oldAsset]) currentReplacements[oldAsset] = {};
+          currentReplacements[oldAsset].date = (inp.value || '').trim();
+        }
+      });
+    }
+
+    function onReplacementFieldChange() {
+      captureCurrentReplacementsFromInputs();
+      updateReplacementCountBadge();
+    }
+
+    function updateReplacementCountBadge() {
+      var badge = document.getElementById('replacementMappingCount');
+      if (!badge) return;
+      var total = currentAssetTags.length;
+      var filled = 0;
+      currentAssetTags.forEach(function(oldAsset) {
+        var item = currentReplacements[oldAsset];
+        if (item && item.newAsset) filled++;
+      });
+      badge.textContent = `${total}건 매핑 (입력 ${filled}대)`;
+      if (filled > 0) {
+        badge.className = 'text-[10px] text-teal-800 font-black bg-teal-200/90 px-1.5 py-0.5 rounded-full border border-teal-300';
+      } else {
+        badge.className = 'text-[10px] text-teal-700 font-bold bg-teal-100 px-1.5 py-0.5 rounded-full';
+      }
+    }
+
+    function renderReplacementMapping() {
+      var container = document.getElementById('replacementMappingList');
+      if (!container) return;
+
+      captureCurrentReplacementsFromInputs();
+
+      var defaultDate = (document.getElementById('inputProcessedDate').value || '').trim() ||
+                        (document.getElementById('inputReceiptDate').value || '').trim() ||
+                        new Date().toISOString().split('T')[0];
+
+      if (currentAssetTags.length === 0) {
+        container.innerHTML = `
+          <div class="py-3 px-2 text-center text-teal-700/80 text-[11px] font-bold bg-white/70 rounded-xl border border-dashed border-teal-300">
+            <i class="fa-solid fa-circle-info mr-1 text-teal-500"></i>
+            상단 [처리 대상 자산번호]에 기존 장비를 먼저 입력하시면 교체 매핑 입력창이 자동으로 생성됩니다.
+          </div>
+        `;
+        updateReplacementCountBadge();
+        return;
+      }
+
+      var html = '';
+      currentAssetTags.forEach(function(oldAsset, idx) {
+        var existing = currentReplacements[oldAsset] || {};
+        var valNew = existing.newAsset || '';
+        var valDate = existing.date || defaultDate;
+        // ensure in map
+        currentReplacements[oldAsset] = { newAsset: valNew, date: valDate };
+
+        html += `
+          <div class="p-2 bg-white rounded-xl border border-teal-200 shadow-2xs flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+            <div class="flex items-center gap-1.5 shrink-0">
+              <span class="text-[10px] font-black text-teal-800 bg-teal-100 px-1.5 py-0.5 rounded font-mono">${idx + 1}</span>
+              <span class="text-xs font-bold text-slate-700">기존 : <b class="font-mono text-indigo-700 font-black">${oldAsset}</b></span>
+              <i class="fa-solid fa-arrow-right text-[10px] text-teal-500 mx-0.5"></i>
+            </div>
+            <div class="flex-1 flex items-center gap-1.5 w-full sm:w-auto">
+              <span class="text-[11px] font-black text-teal-950 shrink-0">교체 장비 :</span>
+              <input type="text"
+                     data-old-asset="${oldAsset}"
+                     value="${valNew}"
+                     oninput="onReplacementFieldChange()"
+                     placeholder="신규 자산번호 (예: 245010001)"
+                     class="replacement-new-input flex-1 min-w-[120px] bg-slate-50 border border-teal-200 rounded-lg px-2 py-1 text-xs font-mono font-bold text-teal-950 uppercase focus:bg-white focus:outline-none focus:border-teal-500 transition">
+              <span class="text-[11px] font-black text-teal-950 shrink-0 ml-1">교체일 :</span>
+              <input type="date"
+                     data-old-asset="${oldAsset}"
+                     value="${valDate}"
+                     onchange="onReplacementFieldChange()"
+                     class="replacement-date-input w-[125px] shrink-0 bg-slate-50 border border-teal-200 rounded-lg px-1.5 py-1 text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:border-teal-500 transition">
+            </div>
+          </div>
+        `;
+      });
+
+      container.innerHTML = html;
+      updateReplacementCountBadge();
+    }
+
+    function applyBatchReplacementDate() {
+      captureCurrentReplacementsFromInputs();
+      if (currentAssetTags.length === 0) return;
+
+      var firstOld = currentAssetTags[0];
+      var baseDate = (currentReplacements[firstOld] && currentReplacements[firstOld].date) ||
+                     (document.getElementById('inputProcessedDate').value || '').trim() ||
+                     (document.getElementById('inputReceiptDate').value || '').trim() ||
+                     new Date().toISOString().split('T')[0];
+
+      currentAssetTags.forEach(function(oldAsset) {
+        if (!currentReplacements[oldAsset]) currentReplacements[oldAsset] = {};
+        currentReplacements[oldAsset].date = baseDate;
+      });
+
+      var dateInputs = document.querySelectorAll('.replacement-date-input');
+      dateInputs.forEach(function(inp) {
+        inp.value = baseDate;
+      });
+
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'info',
+        title: `📅 모든 교체일자 ${baseDate} 일괄 적용`,
+        showConfirmButton: false,
+        timer: 1500
+      });
+    }
+
+    function autoAppendReplacementsToMemo() {
+      captureCurrentReplacementsFromInputs();
+      var lines = [];
+      currentAssetTags.forEach(function(oldAsset, idx) {
+        var item = currentReplacements[oldAsset] || {};
+        var newStr = item.newAsset ? item.newAsset : '(교체 장비 미입력)';
+        var dateStr = item.date ? ` (교체일: ${item.date})` : '';
+        lines.push(`${idx + 1}. 기존: ${oldAsset} ➔ 교체: ${newStr}${dateStr}`);
+      });
+
+      if (lines.length === 0) {
+        Swal.fire('알림', '등록된 처리 대상 자산번호가 없습니다.', 'info');
+        return;
+      }
+
+      var textToAppend = `[장비교체 내역]\n` + lines.join('\n');
+      var memoArea = document.getElementById('inputMemoFull');
+      var curr = memoArea.value.trim();
+      if (!curr) {
+        memoArea.value = textToAppend;
+      } else {
+        memoArea.value = curr + '\n\n' + textToAppend;
+      }
+      memoArea.focus();
+
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: `📝 메모에 교체 내역 ${lines.length}건 자동 반영 완료`,
+        showConfirmButton: false,
+        timer: 1500
+      });
+    }
+
+    // ────────────────────────────────────────────────────────────────
+    // [자산번호 스마트 태그 칩(Tag-Chips) 시스템]
+    // ────────────────────────────────────────────────────────────────
+    var currentAssetTags = [];
+
+    function focusAssetTagInput() {
+      var inp = document.getElementById('inputAssetTag');
+      if (inp) inp.focus();
+    }
+
+    function renderAssetTags() {
+      var container = document.getElementById('assetChipsList');
+      var hiddenInput = document.getElementById('inputAssetNo');
+      var badge = document.getElementById('assetCountBadge');
+      if (!container) return;
+
+      var html = '';
+      currentAssetTags.forEach(function(tag, idx) {
+        html += `
+          <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-xs font-mono font-black bg-indigo-50 text-indigo-700 border border-indigo-200 shadow-2xs group">
+            <span>${tag}</span>
+            <button type="button" onclick="removeAssetTag(${idx})" class="text-indigo-400 hover:text-rose-600 transition ml-0.5 focus:outline-none" title="삭제">
+              <i class="fa-solid fa-xmark text-[10px]"></i>
+            </button>
+          </span>
+        `;
+      });
+      container.innerHTML = html;
+
+      var joined = currentAssetTags.join(', ');
+      if (hiddenInput) hiddenInput.value = joined;
+
+      if (badge) {
+        var count = currentAssetTags.length;
+        badge.textContent = count + '대';
+        if (count > 0) {
+          badge.className = 'text-[10px] font-black px-1.5 py-0.5 rounded-full bg-indigo-100 text-indigo-700 border border-indigo-200';
+        } else {
+          badge.className = 'text-[10px] font-black px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-600';
+        }
+      }
+
+      if (document.getElementById('inputCategory') && document.getElementById('inputCategory').value === '장비교체') {
+        renderReplacementMapping();
+      }
+    }
+
+    function addAssetTag(rawTag) {
+      if (!rawTag) return;
+      var clean = String(rawTag).trim().toUpperCase();
+      if (!clean) return;
+
+      // Duplicate check
+      if (currentAssetTags.indexOf(clean) !== -1) {
+        return;
+      }
+      currentAssetTags.push(clean);
+      renderAssetTags();
+    }
+
+    function removeAssetTag(idx) {
+      if (idx >= 0 && idx < currentAssetTags.length) {
+        currentAssetTags.splice(idx, 1);
+        renderAssetTags();
+      }
+    }
+
+    function handleAssetTagKeydown(e) {
+      var inp = e.target;
+      if (e.key === 'Enter' || e.key === ',') {
+        e.preventDefault();
+        var val = inp.value;
+        if (val) {
+          var parts = val.split(',');
+          parts.forEach(function(p) { addAssetTag(p); });
+          inp.value = '';
+        }
+      } else if (e.key === 'Backspace' && inp.value === '' && currentAssetTags.length > 0) {
+        removeAssetTag(currentAssetTags.length - 1);
+      }
+    }
+
+    function flushAssetTagInput() {
+      var inp = document.getElementById('inputAssetTag');
+      if (inp && inp.value.trim()) {
+        var pTokens = inp.value.split(/[\r\n,\t/]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+        pTokens.forEach(function(tok) { addAssetTag(tok); });
+        inp.value = '';
+      }
+    }
+
+    function handleAssetTagPaste(e) {
+      e.preventDefault();
+      var clipboardData = e.clipboardData || window.clipboardData;
+      if (!clipboardData) return;
+      var pastedText = clipboardData.getData('text');
+      if (!pastedText) return;
+
+      var tokens = pastedText.split(/[\r\n,\t/]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+      var addedCount = 0;
+      tokens.forEach(function(tok) {
+        var c = tok.toUpperCase();
+        if (c && currentAssetTags.indexOf(c) === -1) {
+          currentAssetTags.push(c);
+          addedCount++;
+        }
+      });
+      renderAssetTags();
+      e.target.value = '';
+      if (addedCount > 0) {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'success',
+          title: `📋 자산번호 ${addedCount}건 일괄 등록`,
+          showConfirmButton: false,
+          timer: 1500
+        });
+      }
+    }
+
+    function setAssetTags(tagsOrString) {
+      currentAssetTags = [];
+      if (!tagsOrString) {
+        renderAssetTags();
+        return;
+      }
+      if (Array.isArray(tagsOrString)) {
+        tagsOrString.forEach(function(t) {
+          var c = String(t).trim().toUpperCase();
+          if (c && currentAssetTags.indexOf(c) === -1) currentAssetTags.push(c);
+        });
+      } else if (typeof tagsOrString === 'string') {
+        var tokens = tagsOrString.split(/[\r\n,\t/]+/).map(function(s) { return s.trim().toUpperCase(); }).filter(Boolean);
+        tokens.forEach(function(c) {
+          if (c && currentAssetTags.indexOf(c) === -1) currentAssetTags.push(c);
+        });
+      }
+      renderAssetTags();
+    }
+
+    function clearAssetTags() {
+      currentAssetTags = [];
+      var inp = document.getElementById('inputAssetTag');
+      if (inp) inp.value = '';
+      renderAssetTags();
     }
 
     // Quick Chips Handlers
@@ -1057,7 +1446,14 @@
 
       var recordId = document.getElementById('editRecordId').value;
       var contractNo = (document.getElementById('inputContractNo').value || '').trim().toUpperCase();
-      var assetNo = (document.getElementById('inputAssetNo').value || '').trim();
+      // Flush any pending un-submitted text in the asset tag input
+      var inpTag = document.getElementById('inputAssetTag');
+      if (inpTag && inpTag.value.trim()) {
+        var pTokens = inpTag.value.split(/[\r\n,\t/]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+        pTokens.forEach(function(tok) { addAssetTag(tok); });
+        inpTag.value = '';
+      }
+      var assetNo = currentAssetTags.join(', ');
       var customerName = (document.getElementById('inputCustomerName').value || '').trim();
       var symptom = (document.getElementById('inputSymptom').value || '').trim();
       var category = document.getElementById('inputCategory').value;
@@ -1089,9 +1485,27 @@
         return;
       }
 
+      // Capture replacements if category === '장비교체'
+      var replacementsList = [];
+      if (category === '장비교체') {
+        captureCurrentReplacementsFromInputs();
+        currentAssetTags.forEach(function(oldAsset) {
+          var rep = currentReplacements[oldAsset];
+          if (rep) {
+            replacementsList.push({
+              old: oldAsset,
+              new: rep.newAsset || '',
+              date: rep.date || processedDate || receiptDate || ''
+            });
+          }
+        });
+      }
+
       // Pack special JSON for asset & symptom & dates
       var specialObj = {
         asset_no: assetNo,
+        asset_nos: currentAssetTags,
+        replacements: replacementsList,
         symptom: symptom,
         receipt_date: receiptDate,
         processed_date: processedDate,
@@ -1158,8 +1572,11 @@
       var today = new Date().toISOString().split('T')[0];
       document.getElementById('editRecordId').value = '';
       document.getElementById('inputContractNo').value = '';
-      document.getElementById('inputAssetNo').value = '';
       document.getElementById('inputCustomerName').value = '';
+      currentReplacements = {};
+      var mappingSec = document.getElementById('replacementMappingSection');
+      if (mappingSec) mappingSec.classList.add('hidden');
+      clearAssetTags();
       document.getElementById('inputSymptom').value = '';
       document.getElementById('inputDriver').value = '';
       document.getElementById('inputMemoFull').value = '';
@@ -1198,9 +1615,10 @@
       var symptom = '';
       var receiptDate = '';
       var processedDate = '';
+      var p = {};
       if (r.memo_special) {
         try {
-          var p = JSON.parse(r.memo_special);
+          p = JSON.parse(r.memo_special);
           assetNo = p.asset_no || '';
           symptom = p.symptom || '';
           receiptDate = p.receipt_date || '';
@@ -1213,8 +1631,20 @@
 
       document.getElementById('inputReceiptDate').value = receiptDate;
       document.getElementById('inputProcessedDate').value = processedDate;
-      document.getElementById('inputAssetNo').value = assetNo;
+      setAssetTags(p.asset_nos || p.asset_no || assetNo || '');
       document.getElementById('inputSymptom').value = symptom;
+
+      currentReplacements = {};
+      if (p.replacements && Array.isArray(p.replacements)) {
+        p.replacements.forEach(function(rep) {
+          if (rep.old) {
+            currentReplacements[rep.old] = {
+              newAsset: rep.new || '',
+              date: rep.date || processedDate || receiptDate || ''
+            };
+          }
+        });
+      }
 
       selectCategory(r.category || '원격지원');
 
@@ -1307,6 +1737,7 @@
           var symptom = '';
           var receiptDate = '';
           var processedDate = '';
+          var replacementKeywords = [];
           if (r.memo_special) {
             try {
               var p = JSON.parse(r.memo_special);
@@ -1314,6 +1745,12 @@
               symptom = p.symptom || '';
               receiptDate = p.receipt_date || '';
               processedDate = p.processed_date || '';
+              if (p.replacements && Array.isArray(p.replacements)) {
+                p.replacements.forEach(function(rep) {
+                  if (rep.new) replacementKeywords.push(rep.new);
+                  if (rep.date) replacementKeywords.push(rep.date);
+                });
+              }
             } catch (e) {}
           }
           if (!receiptDate) receiptDate = r.delivery_date || '';
@@ -1327,7 +1764,8 @@
             receiptDate,
             processedDate,
             assetNo,
-            symptom
+            symptom,
+            replacementKeywords.join(' ')
           ].join(' ').toLowerCase();
 
           if (haystack.indexOf(searchQ) === -1) return false;
@@ -1352,13 +1790,16 @@
       var html = '';
       filtered.forEach(function(r) {
         var assetNo = '';
+        var assetList = [];
         var symptom = '';
         var receiptDate = '';
         var processedDate = '';
+        var p = {};
         if (r.memo_special) {
           try {
-            var p = JSON.parse(r.memo_special);
+            p = JSON.parse(r.memo_special);
             assetNo = p.asset_no || '';
+            assetList = p.asset_nos || (assetNo ? assetNo.split(/,\s*/).filter(Boolean) : []);
             symptom = p.symptom || '';
             receiptDate = p.receipt_date || '';
             processedDate = p.processed_date || '';
@@ -1366,6 +1807,13 @@
         }
         if (!receiptDate) receiptDate = r.delivery_date || '-';
         if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
+
+        var assetBadgeHtml = '';
+        if (assetList.length === 1) {
+          assetBadgeHtml = `<span class="text-indigo-700 font-mono font-bold text-[10px] bg-white px-1.5 py-0.5 rounded border border-indigo-200 shadow-2xs" title="자산번호: ${assetList[0]}"><i class="fa-solid fa-barcode text-[9px] text-indigo-500"></i> 자산: ${assetList[0]}</span>`;
+        } else if (assetList.length > 1) {
+          assetBadgeHtml = `<span class="text-indigo-800 font-mono font-bold text-[10px] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-300 shadow-2xs cursor-help" title="등록된 자산 전체: ${assetList.join(', ')}"><i class="fa-solid fa-boxes-stacked text-[9px] text-indigo-600"></i> 자산 ${assetList.length}대 <span class="text-slate-500 font-normal">(${assetList[0]} 외 ${assetList.length - 1}건)</span></span>`;
+        }
 
         // Category Badge Style
         var catBadge = '';
@@ -1375,6 +1823,8 @@
           catBadge = '<span class="px-2 py-0.5 rounded-lg font-black text-[10px] category-badge-phone flex items-center gap-1"><i class="fa-solid fa-headset text-[9px]"></i> 유선안내</span>';
         } else if (r.category === '입고수리') {
           catBadge = '<span class="px-2 py-0.5 rounded-lg font-black text-[10px] category-badge-inhouse flex items-center gap-1"><i class="fa-solid fa-boxes-packing text-[9px]"></i> 입고수리</span>';
+        } else if (r.category === '장비교체') {
+          catBadge = '<span class="px-2 py-0.5 rounded-lg font-black text-[10px] category-badge-replace flex items-center gap-1"><i class="fa-solid fa-arrows-rotate text-[9px]"></i> 장비교체</span>';
         } else {
           catBadge = '<span class="px-2 py-0.5 rounded-lg font-black text-[10px] category-badge-onsite flex items-center gap-1"><i class="fa-solid fa-screwdriver-wrench text-[9px]"></i> 현장방문</span>';
         }
@@ -1392,6 +1842,22 @@
         var memoPreview = (r.memo_full || '-').replace(/\n/g, ' ');
         if (memoPreview.length > 90) memoPreview = memoPreview.substring(0, 90) + '...';
 
+        // Replacement mapping badge html for list card
+        var replacementBadgesHtml = '';
+        if (r.category === '장비교체' && p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) {
+          replacementBadgesHtml = `
+            <div class="p-1.5 bg-teal-50/80 rounded-xl border border-teal-200 text-[11px] text-teal-950 font-bold flex flex-wrap items-center gap-1.5 shadow-2xs">
+              <span class="text-teal-800 font-black text-[10px] bg-teal-100 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
+                <i class="fa-solid fa-arrows-rotate text-[9px]"></i> 교체 ${p.replacements.length}건
+              </span>
+              ${p.replacements.map(function(rep) {
+                var dateStr = rep.date ? ` <span class="text-slate-500 font-mono text-[9.5px]">(${rep.date.substring(5)})</span>` : '';
+                return `<span class="bg-white px-2 py-0.5 rounded-md border border-teal-200 font-mono text-[10.5px] shadow-2xs">${rep.old} <i class="fa-solid fa-arrow-right text-[8px] text-teal-500 mx-0.5"></i> <b class="text-teal-800">${rep.new || '미입력'}</b>${dateStr}</span>`;
+              }).join('')}
+            </div>
+          `;
+        }
+
         html += `
           <div class="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-2xl border border-slate-200 transition space-y-2">
             <!-- Row 1: Badges, Dates (접수/처리), Cust, Contract -->
@@ -1401,7 +1867,7 @@
                 ${statBadge}
                 <span class="font-black text-slate-900 text-xs">${r.customer_name || '-'}</span>
                 <span class="font-mono text-indigo-700 font-bold text-[11px] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">계약: ${r.contract_no || '-'}</span>
-                ${assetNo ? `<span class="text-slate-500 font-bold text-[10px] bg-white px-1.5 py-0.5 rounded border border-slate-200">자산: ${assetNo}</span>` : ''}
+                ${assetBadgeHtml}
               </div>
               <div class="flex items-center gap-2 text-[11px] text-slate-500 font-bold flex-wrap">
                 <span title="A/S 접수일자"><i class="fa-regular fa-calendar-plus text-indigo-500"></i> 접수: <b class="text-slate-800">${receiptDate}</b></span>
@@ -1417,6 +1883,9 @@
               <span class="font-black text-rose-800 bg-rose-50 px-1.5 py-0.5 rounded text-[10px] shrink-0 border border-rose-200">증상</span>
               <span class="font-bold text-slate-800 leading-snug">${symptom || '증상 미기재'}</span>
             </div>
+
+            <!-- Row 2.5: Replacement Mapping -->
+            ${replacementBadgesHtml}
 
             <!-- Row 3: Large Memo Preview & Actions -->
             <div class="p-2 bg-white rounded-xl border border-slate-200/80 text-[11px] text-slate-600 flex items-start justify-between gap-2">
@@ -1455,7 +1924,8 @@
         '원격지원': document.getElementById('filterCatRemote'),
         '유선안내': document.getElementById('filterCatPhone'),
         '현장방문': document.getElementById('filterCatOnsite'),
-        '입고수리': document.getElementById('filterCatInhouse')
+        '입고수리': document.getElementById('filterCatInhouse'),
+        '장비교체': document.getElementById('filterCatReplace')
       };
 
       Object.keys(buttons).forEach(function(k) {
@@ -1564,6 +2034,7 @@
           if (isAs) {
             // A/S Record Card
             var assetNo = '';
+            var assetList = [];
             var symptom = '';
             var receiptDate = '';
             var processedDate = '';
@@ -1571,6 +2042,7 @@
               try {
                 var p = JSON.parse(row.memo_special);
                 assetNo = p.asset_no || '';
+                assetList = p.asset_nos || (assetNo ? assetNo.split(/,\s*/).filter(Boolean) : []);
                 symptom = p.symptom || '';
                 receiptDate = p.receipt_date || '';
                 processedDate = p.processed_date || '';
@@ -1578,6 +2050,13 @@
             }
             if (!receiptDate) receiptDate = row.delivery_date || '-';
             if (!processedDate && row.status === '처리완료') processedDate = row.delivery_date || '';
+
+            var tlAssetBadge = '';
+            if (assetList.length === 1) {
+              tlAssetBadge = `<span class="text-[10px] font-mono font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200"><i class="fa-solid fa-barcode text-[9px] text-indigo-500"></i> 자산: ${assetList[0]}</span>`;
+            } else if (assetList.length > 1) {
+              tlAssetBadge = `<span class="text-[10px] font-mono font-bold text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200" title="전체 자산: ${assetList.join(', ')}"><i class="fa-solid fa-boxes-stacked text-[9px] text-indigo-600"></i> 자산 ${assetList.length}대: ${assetList.join(', ')}</span>`;
+            }
 
             var iconClass = 'fa-solid fa-wrench text-rose-600';
             var dotBg = 'bg-rose-500';
@@ -1594,7 +2073,7 @@
                       </span>
                       <span class="font-bold text-slate-800 text-xs">접수: ${receiptDate}</span>
                       ${processedDate ? `<span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">처리: ${processedDate}</span>` : '<span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">처리대기</span>'}
-                      ${assetNo ? `<span class="text-[10px] text-slate-500 font-bold">자산: ${assetNo}</span>` : ''}
+                      ${tlAssetBadge}
                     </div>
                     <span class="text-[10px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                       처리자: ${driver}
@@ -1603,6 +2082,17 @@
                   <div class="text-xs font-bold text-slate-900 flex items-center gap-1">
                     <span class="text-rose-700 font-black text-[10px]">[증상]</span> ${symptom || '-'}
                   </div>
+                  ${(cat === '장비교체' && p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) ? `
+                    <div class="p-1.5 bg-teal-50/80 rounded-xl border border-teal-200 text-[11px] text-teal-950 font-bold flex flex-wrap items-center gap-1.5 shadow-2xs">
+                      <span class="text-teal-800 font-black text-[10px] bg-teal-100 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
+                        <i class="fa-solid fa-arrows-rotate text-[9px]"></i> 교체 ${p.replacements.length}건
+                      </span>
+                      ${p.replacements.map(function(rep) {
+                        var d = rep.date ? ` <span class="text-slate-500 font-mono text-[9.5px]">(${rep.date.substring(5)})</span>` : '';
+                        return `<span class="bg-white px-2 py-0.5 rounded-md border border-teal-200 font-mono text-[10.5px] shadow-2xs">${rep.old} <i class="fa-solid fa-arrow-right text-[8px] text-teal-500 mx-0.5"></i> <b class="text-teal-800">${rep.new || '미입력'}</b>${d}</span>`;
+                      }).join('')}
+                    </div>
+                  ` : ''}
                   <div class="p-2 bg-white rounded-xl border border-slate-200 text-xs text-slate-700 leading-relaxed whitespace-pre-line font-medium">
                     ${memoFull}
                   </div>
@@ -1814,6 +2304,7 @@
       if (!r) return;
 
       var assetNo = '';
+      var assetList = [];
       var symptom = '';
       var receiptDate = '';
       var processedDate = '';
@@ -1821,6 +2312,7 @@
         try {
           var p = JSON.parse(r.memo_special);
           assetNo = p.asset_no || '';
+          assetList = p.asset_nos || (assetNo ? assetNo.split(/,\s*/).filter(Boolean) : []);
           symptom = p.symptom || '';
           receiptDate = p.receipt_date || '';
           processedDate = p.processed_date || '';
@@ -1829,14 +2321,40 @@
       if (!receiptDate) receiptDate = r.delivery_date || '-';
       if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
 
+      var assetStr = '';
+      if (assetList.length === 1) {
+        assetStr = `· 자산: <span class="font-mono text-indigo-800 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">${assetList[0]}</span>`;
+      } else if (assetList.length > 1) {
+        assetStr = `· 자산(${assetList.length}대): <span class="font-mono text-indigo-900 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">${assetList.join(', ')}</span>`;
+      }
+
+      var repMetaHtml = '';
+      if (r.category === '장비교체' && p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) {
+        repMetaHtml = `
+          <div class="mt-2.5 p-2.5 bg-teal-50 rounded-xl border border-teal-200 text-xs">
+            <div class="font-black text-teal-900 mb-1.5 flex items-center gap-1">
+              <i class="fa-solid fa-arrows-rotate text-teal-600"></i>
+              <span>장비 교체 매핑 내역 (${p.replacements.length}건)</span>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 font-mono">
+              ${p.replacements.map(function(rep, idx) {
+                var d = rep.date ? ` <span class="text-slate-500 font-sans text-[10px]">· 교체일: ${rep.date}</span>` : '';
+                return `<div class="p-1.5 bg-white rounded-lg border border-teal-100 flex items-center justify-between text-[11px] shadow-2xs"><span class="text-slate-700 font-bold">${idx + 1}. ${rep.old}</span><span class="text-teal-800 font-black">➔ ${rep.new || '미입력'}${d}</span></div>`;
+              }).join('')}
+            </div>
+          </div>
+        `;
+      }
+
       document.getElementById('detailModalTitle').textContent = `[${r.customer_name}] A/S 상세 조치 내역`;
       document.getElementById('detailModalMeta').innerHTML = `
         <div class="flex items-center justify-between font-bold flex-wrap gap-1">
           <span>구분: <b class="text-indigo-600">${r.category}</b> (${r.status})</span>
           <span>접수일: <b>${receiptDate}</b> ${processedDate ? `· 처리일: <b>${processedDate}</b>` : '· (미처리)'} · 처리자: <b>${r.driver_name || '-'}</b></span>
         </div>
-        <div class="font-bold text-slate-700">계약번호: <span class="font-mono text-indigo-700">${r.contract_no}</span> ${assetNo ? `· 자산번호: ${assetNo}` : ''}</div>
+        <div class="font-bold text-slate-700 flex items-center gap-1.5 flex-wrap">계약번호: <span class="font-mono text-indigo-700">${r.contract_no}</span> ${assetStr}</div>
         <div class="font-bold text-rose-700">증상: ${symptom || '-'}</div>
+        ${repMetaHtml}
       `;
       document.getElementById('detailModalContent').textContent = r.memo_full || '-';
 
@@ -1859,13 +2377,19 @@
         var symptom = '';
         var receiptDate = '';
         var processedDate = '';
+        var repSummary = '';
         if (r.memo_special) {
           try {
             var p = JSON.parse(r.memo_special);
-            assetNo = p.asset_no || '';
+            assetNo = p.asset_no || (p.asset_nos ? p.asset_nos.join(', ') : '');
             symptom = p.symptom || '';
             receiptDate = p.receipt_date || '';
             processedDate = p.processed_date || '';
+            if (p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) {
+              repSummary = p.replacements.map(function(rep) {
+                return `${rep.old}->${rep.new || ''}(${rep.date || ''})`;
+              }).join('; ');
+            }
           } catch(e) {}
         }
         if (!receiptDate) receiptDate = r.delivery_date || '';
@@ -1880,6 +2404,7 @@
           '고객사명': r.customer_name || '',
           '계약번호': r.contract_no || '',
           '자산번호': assetNo,
+          '교체장비_매핑내역': repSummary,
           '증상': symptom,
           '처리담당자': r.driver_name || '',
           '상세처리내역_메모': r.memo_full || ''
