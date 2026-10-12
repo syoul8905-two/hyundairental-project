@@ -591,8 +591,8 @@
   </div>
 
   <!-- Modal 3: Large Memo Detail Modal -->
-  <div id="memoDetailModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 animate-in fade-in duration-150">
-    <div class="bg-white rounded-3xl max-w-xl w-full max-h-[80vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
+  <div id="memoDetailModal" class="hidden fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-150">
+    <div class="bg-white rounded-3xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden">
       <div class="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
         <div class="flex items-center gap-2">
           <i class="fa-solid fa-file-lines text-indigo-400 text-base"></i>
@@ -715,6 +715,16 @@
         updateKpiCards();
         renderAsList();
         setSyncStatus(false, '⚡ 클라우드 실시간 동기화 (' + asRecords.length + '건)');
+
+        // Deep link query support (e.g. ?openMemo=first_replace or ?openMemo=123)
+        var urlParams = new URLSearchParams(window.location.search);
+        var autoMemoId = urlParams.get('openMemo');
+        if (autoMemoId) {
+          var targetRec = (autoMemoId === 'first_replace')
+            ? asRecords.find(function(r) { return r.category === '장비교체'; })
+            : asRecords.find(function(r) { return String(r.id) === String(autoMemoId); });
+          if (targetRec) openMemoDetailModal(targetRec.id);
+        }
       } catch (err) {
         console.error('Error loading AS records:', err);
         setSyncStatus(false, '⚠️ 동기화 실패');
@@ -2331,15 +2341,43 @@
       var repMetaHtml = '';
       if (r.category === '장비교체' && p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) {
         repMetaHtml = `
-          <div class="mt-2.5 p-2.5 bg-teal-50 rounded-xl border border-teal-200 text-xs">
-            <div class="font-black text-teal-900 mb-1.5 flex items-center gap-1">
-              <i class="fa-solid fa-arrows-rotate text-teal-600"></i>
-              <span>장비 교체 매핑 내역 (${p.replacements.length}건)</span>
+          <div class="mt-3 p-3 bg-teal-50/80 rounded-2xl border border-teal-200 text-xs">
+            <div class="font-black text-teal-950 mb-2 flex items-center justify-between">
+              <div class="flex items-center gap-1.5">
+                <i class="fa-solid fa-arrows-rotate text-teal-600"></i>
+                <span class="text-xs font-black">장비 교체 매핑 내역</span>
+                <span class="bg-teal-200/90 text-teal-900 px-2 py-0.5 rounded-full font-mono font-black text-[11px]">${p.replacements.length}건</span>
+              </div>
             </div>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5 font-mono">
+            <div class="space-y-1.5 font-sans">
               ${p.replacements.map(function(rep, idx) {
-                var d = rep.date ? ` <span class="text-slate-500 font-sans text-[10px]">· 교체일: ${rep.date}</span>` : '';
-                return `<div class="p-1.5 bg-white rounded-lg border border-teal-100 flex items-center justify-between text-[11px] shadow-2xs"><span class="text-slate-700 font-bold">${idx + 1}. ${rep.old}</span><span class="text-teal-800 font-black">➔ ${rep.new || '미입력'}${d}</span></div>`;
+                var dHtml = rep.date 
+                  ? `<div class="flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-slate-50 px-2.5 py-1 rounded-lg border border-slate-200 shrink-0">
+                       <i class="fa-regular fa-calendar-check text-teal-600"></i>
+                       <span class="text-slate-500 font-medium">교체일:</span>
+                       <b class="text-slate-800 font-mono font-black">${rep.date}</b>
+                     </div>` 
+                  : `<span class="text-slate-400 text-[11px] font-medium shrink-0 bg-slate-50 px-2 py-1 rounded border border-dashed border-slate-200">(교체일 미기재)</span>`;
+
+                return `
+                  <div class="p-2.5 bg-white rounded-xl border border-teal-200/90 hover:border-teal-300 shadow-2xs flex items-center justify-between gap-3 flex-wrap sm:flex-nowrap transition">
+                    <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                      <span class="px-2 py-0.5 rounded-md bg-teal-100 text-teal-800 font-black text-[11px] font-mono shrink-0">
+                        No. ${idx + 1}
+                      </span>
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-slate-500 font-bold text-[11px]">기존 장비 :</span>
+                        <span class="font-mono text-indigo-900 font-black bg-indigo-50 px-2 py-0.5 rounded-md border border-indigo-200 text-xs">${rep.old}</span>
+                      </div>
+                      <i class="fa-solid fa-arrow-right-long text-teal-500 text-xs px-1 shrink-0"></i>
+                      <div class="flex items-center gap-1.5">
+                        <span class="text-teal-950 font-bold text-[11px]">교체 장비 :</span>
+                        <span class="font-mono text-teal-950 font-black bg-teal-50 px-2 py-0.5 rounded-md border border-teal-300 text-xs">${rep.new || '<span class="text-slate-400 font-normal">미입력</span>'}</span>
+                      </div>
+                    </div>
+                    ${dHtml}
+                  </div>
+                `;
               }).join('')}
             </div>
           </div>
