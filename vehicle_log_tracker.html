@@ -537,6 +537,88 @@
   </div>
 
   <!-- ========================================== -->
+  <!-- Modal 0-1: Admin Quick Close Trip Modal   -->
+  <!-- ========================================== -->
+  <div id="quickCloseTripModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden flex items-center justify-center p-3 animate-in fade-in duration-150">
+    <div class="bg-white rounded-2xl w-full max-w-md shadow-2xl border border-slate-200 overflow-hidden animate-in zoom-in-95 duration-150">
+      <div class="px-4 py-3.5 bg-slate-900 text-white flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-flag-checkered text-amber-400"></i>
+          <h3 class="font-black text-sm">관리자 직접 운행 종료 (마감)</h3>
+        </div>
+        <button type="button" onclick="closeQuickCloseTripModal()" class="w-7 h-7 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center transition cursor-pointer">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <form id="quickCloseTripForm" onsubmit="submitQuickCloseTrip(event)" class="p-4 space-y-3.5">
+        <input type="hidden" id="quickCloseLogId" value="">
+
+        <!-- Trip Summary Card -->
+        <div class="p-3 bg-amber-50/70 rounded-xl border border-amber-200/80 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-200 text-amber-900 border border-amber-300">
+              <i class="fa-solid fa-flag-checkered mr-0.5"></i> 복귀 마감
+            </span>
+            <span class="text-xs font-mono font-bold text-slate-600" id="quickCloseDateText">2026-10-12 (월)</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <h4 class="font-black text-sm text-slate-900" id="quickCloseVehicleDriver">801부8744 · 장용순 기사</h4>
+            <span class="text-xs font-bold text-slate-500 font-mono" id="quickCloseDepartText">🚀 출발: 17:10</span>
+          </div>
+          <p class="text-xs text-slate-600 flex items-center gap-1">
+            <i class="fa-solid fa-location-dot text-indigo-500"></i>
+            <span id="quickCloseDestName" class="font-medium text-[11px] truncate">가산 센터 (최종 복귀)</span>
+          </p>
+        </div>
+
+        <!-- Arrival Time Input & Quick Buttons -->
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="block text-xs font-bold text-slate-700">
+              <i class="fa-regular fa-clock text-indigo-600 mr-1"></i>복귀 도착 시각 (HH:mm)
+            </label>
+            <div class="flex items-center gap-1">
+              <button type="button" onclick="setQuickCloseTime('now')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 text-[10px] font-bold rounded border border-slate-200 transition cursor-pointer">현재시각</button>
+              <button type="button" onclick="setQuickCloseTime('+30')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 text-[10px] font-bold rounded border border-slate-200 transition cursor-pointer">+30분</button>
+              <button type="button" onclick="setQuickCloseTime('+45')" class="px-1.5 py-0.5 bg-slate-100 hover:bg-indigo-50 text-slate-600 hover:text-indigo-600 text-[10px] font-bold rounded border border-slate-200 transition cursor-pointer">+45분</button>
+            </div>
+          </div>
+          <input type="time" id="quickCloseArriveTime" required class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold font-mono focus:bg-white focus:border-indigo-600 outline-none">
+        </div>
+
+        <!-- End Km & Calculated Distance -->
+        <div class="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+          <div class="flex items-center justify-between">
+            <label class="block text-xs font-bold text-slate-700">
+              <i class="fa-solid fa-gauge-high text-emerald-600 mr-1"></i>최종 계기판 Km (운행 종료)
+            </label>
+            <span class="text-[10px] text-slate-500 font-mono">출발: <b id="quickCloseStartKmText" class="text-slate-700">145,038</b> km</span>
+          </div>
+          <input type="number" id="quickCloseEndKm" min="0" oninput="calcQuickCloseMileage()" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold font-mono text-right focus:border-emerald-500 outline-none" placeholder="종료 계기판">
+          <div class="flex items-center justify-between text-xs font-mono pt-1 border-t border-slate-200/60">
+            <span class="text-slate-500">당일 총 주행거리:</span>
+            <span class="font-black text-indigo-600" id="quickCloseDistText">0 km</span>
+          </div>
+        </div>
+
+        <div class="p-2.5 bg-amber-50/60 rounded-xl border border-amber-200/50 text-[11px] text-amber-900 flex items-start gap-1.5">
+          <i class="fa-solid fa-circle-info text-amber-600 mt-0.5 shrink-0"></i>
+          <span>운행 종료 시 <b>[복귀대기]</b>가 <b>[완료]</b>로 즉시 전환되며, 기사 모바일 앱에서도 마감 완료로 정상 동기화됩니다.</span>
+        </div>
+
+        <!-- Footer Buttons -->
+        <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+          <button type="button" onclick="closeQuickCloseTripModal()" class="px-3.5 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-600 transition cursor-pointer">취소</button>
+          <button type="submit" id="btnSubmitQuickClose" class="px-4 py-2 rounded-xl text-xs font-black bg-amber-500 hover:bg-amber-600 text-white shadow-xs transition flex items-center gap-1.5 cursor-pointer">
+            <i class="fa-solid fa-flag-checkered"></i>
+            <span>운행 종료(마감) 확정</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ========================================== -->
   <!-- Modal 1: Edit / Create Trip Log Modal      -->
   <!-- ========================================== -->
   <div id="tripLogModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 hidden flex items-center justify-center p-2 sm:p-4 animate-in fade-in duration-150">
@@ -2493,6 +2575,11 @@
                     <span class="text-slate-600 font-medium">배송 <b class="text-indigo-600">${delivCount}</b>건 (총 ${legs.length}곳 방문)</span>
                     <span class="font-mono ${log.parking_fee > 0 ? 'text-amber-700 font-bold' : 'text-slate-400'}">주차비: ₩${log.parking_fee.toLocaleString()}</span>
                     <span class="font-mono ${log.fuel_fee > 0 ? 'text-rose-700 font-bold' : 'text-slate-400'}">주유비: ₩${log.fuel_fee.toLocaleString()}</span>
+                    ${!log.is_closed && !isUnop ? `
+                      <button type="button" onclick="openQuickCloseTripModal(${log.id})" class="px-2 py-0.5 rounded bg-amber-500 hover:bg-amber-600 text-white transition text-[10px] font-bold shadow-2xs inline-flex items-center gap-1 cursor-pointer" title="관리자 직접 운행 마감">
+                        <i class="fa-solid fa-flag-checkered"></i> 운행 마감
+                      </button>
+                    ` : ''}
                     <button type="button" onclick="openEditLogModal(${log.id})" class="px-2 py-0.5 rounded bg-white hover:bg-slate-50 text-slate-600 hover:text-indigo-600 border border-slate-300 transition text-[10px] font-bold shadow-2xs">
                       <i class="fa-solid fa-pen-to-square"></i> 당일 일지 수정
                     </button>
@@ -2550,7 +2637,16 @@
                       <span class="truncate max-w-[200px]" title="${leg.name}">${leg.name}</span>
                       ${leg.depart ? `<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">🚀 출발 ${leg.depart}</span>` : ''}
                       ${leg.arrive ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">🏁 도착 ${leg.arrive}</span>` : ''}
-                      ${leg.status === '도착완료' || leg.status === '완료' || leg.status === '배송완료' ? `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9.5px] font-bold">완료</span>` : (leg.status === '운행중' ? `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[9.5px] font-bold">운행중</span>` : (leg.status === '복귀대기' || leg.status === '복귀중' ? `<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[9.5px] font-bold border border-amber-200">복귀대기</span>` : ''))}
+                      ${leg.status === '도착완료' || leg.status === '완료' || leg.status === '배송완료' 
+                        ? `<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 text-[9.5px] font-bold">완료</span>` 
+                        : (leg.status === '운행중' 
+                          ? `<span class="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 text-[9.5px] font-bold">운행중</span>` 
+                          : (leg.status === '복귀대기' || leg.status === '복귀중' || (isReturn && !log.is_closed)
+                            ? `<button type="button" onclick="openQuickCloseTripModal(${log.id}, '${leg.depart || ''}', '${leg.arrive || ''}')" class="px-1.5 py-0.5 rounded bg-amber-100 hover:bg-amber-200 text-amber-900 text-[9.5px] font-bold border border-amber-300 transition inline-flex items-center gap-1 cursor-pointer shadow-2xs hover:scale-105" title="클릭하여 관리자가 직접 운행 종료(마감) 처리">
+                                 <span>복귀대기</span>
+                                 <i class="fa-solid fa-flag-checkered text-amber-700 text-[9px]"></i>
+                               </button>` 
+                            : ''))}
                     </div>
                     <div class="flex items-center gap-1 text-[11px] text-slate-500 font-mono">
                       <i class="fa-solid fa-location-dot text-indigo-400 text-[10px] shrink-0"></i>
@@ -2580,6 +2676,12 @@
                 </td>
                 <td class="py-2 px-3 text-center whitespace-nowrap">
                   <div class="inline-flex items-center gap-1 justify-center">
+                    ${(isReturn || isMidReturn) && (!log.is_closed || leg.status === '복귀대기' || leg.status === '복귀중') ? `
+                      <button type="button" onclick="openQuickCloseTripModal(${log.id}, '${leg.depart || ''}', '${leg.arrive || ''}')" class="px-2 py-1 bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs cursor-pointer" title="관리자 직접 복귀 및 운행 종료 처리">
+                        <i class="fa-solid fa-flag-checkered text-[10px]"></i>
+                        <span>운행종료</span>
+                      </button>
+                    ` : ''}
                     <button type="button" onclick="openEditStopFeeModal(${log.id}, ${leg.stopIndex})" class="px-2 py-1 bg-slate-100 hover:bg-amber-100 text-slate-700 hover:text-amber-900 border border-slate-200 hover:border-amber-300 rounded-lg transition text-[10px] font-bold inline-flex items-center gap-1 shadow-2xs" title="배송지별 주차비/주유비 수정">
                       <i class="fa-solid fa-receipt text-[10px] text-amber-600"></i>
                       <span>비용</span>
@@ -2687,6 +2789,11 @@
             </td>
             <td class="py-2.5 px-3 text-center">
               <div class="flex items-center justify-center gap-1">
+                ${!log.is_closed && !isUnop ? `
+                  <button onclick="openQuickCloseTripModal(${log.id})" class="p-1 text-amber-500 hover:text-amber-700 transition cursor-pointer" title="관리자 직접 운행 종료">
+                    <i class="fa-solid fa-flag-checkered text-xs"></i>
+                  </button>
+                ` : ''}
                 <button onclick="openEditLogModal(${log.id})" class="p-1 text-slate-400 hover:text-indigo-600 transition" title="수정">
                   <i class="fa-solid fa-pen-to-square"></i>
                 </button>
@@ -2698,6 +2805,246 @@
           </tr>
         `;
       }).join('');
+    }
+
+    // ==========================================
+    // Quick Close Trip Modal Handlers (관리자 직접 운행 종료)
+    // ==========================================
+    function openQuickCloseTripModal(logId, defaultDepart, defaultArrive) {
+      var log = tripLogs.find(function(l) { return l.id === logId; });
+      if (!log) {
+        alert('운행일지 데이터를 찾을 수 없습니다.');
+        return;
+      }
+
+      var dayOfWeek = '';
+      if (log.trip_date) {
+        var days = ['일', '월', '화', '수', '목', '금', '토'];
+        var d = new Date(log.trip_date + 'T00:00:00');
+        dayOfWeek = !isNaN(d.getDay()) ? days[d.getDay()] : '';
+      }
+
+      var returnStop = (log.stops && log.stops.length > 0)
+        ? (log.stops.find(function(s) { return s.type === 'return'; }) || log.stops[log.stops.length - 1])
+        : null;
+
+      var depTime = defaultDepart || (returnStop ? returnStop.depart : '') || '';
+      var arrTime = defaultArrive || (returnStop ? returnStop.arrive : '') || log.closed_at || '';
+
+      // If arrive time is missing, smartly suggest
+      if (!arrTime) {
+        if (depTime) {
+          var depM = parseTimeToMinutes(depTime);
+          if (depM !== null) {
+            var arrM = depM + 35;
+            var ch = Math.floor(arrM / 60) % 24;
+            var cm = arrM % 60;
+            arrTime = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+          }
+        }
+        if (!arrTime) {
+          var now = new Date();
+          arrTime = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+        }
+      }
+
+      document.getElementById('quickCloseLogId').value = log.id;
+      document.getElementById('quickCloseDateText').innerText = `${log.trip_date} (${dayOfWeek})`;
+      document.getElementById('quickCloseVehicleDriver').innerText = `${log.vehicle_no} · ${log.driver_name} 기사`;
+      var depEl = document.getElementById('quickCloseDepartText');
+      if (depEl) {
+        depEl.innerText = depTime ? `🚀 출발: ${depTime}` : '🚀 출발: -';
+        depEl.dataset.departTime = depTime;
+      }
+      var destEl = document.getElementById('quickCloseDestName');
+      if (destEl) {
+        destEl.innerText = (returnStop ? returnStop.name : '') || log.destination_name || log.destination_addr || '가산 센터 (최종 복귀)';
+      }
+
+      var arrInput = document.getElementById('quickCloseArriveTime');
+      if (arrInput) arrInput.value = arrTime;
+
+      var startKmEl = document.getElementById('quickCloseStartKmText');
+      if (startKmEl) {
+        startKmEl.innerText = (log.start_km || 0).toLocaleString();
+        startKmEl.dataset.startKm = log.start_km || 0;
+      }
+
+      var endKmVal = log.end_km && log.end_km >= log.start_km ? log.end_km : log.start_km;
+      var endKmInput = document.getElementById('quickCloseEndKm');
+      if (endKmInput) endKmInput.value = endKmVal;
+
+      calcQuickCloseMileage();
+
+      var modal = document.getElementById('quickCloseTripModal');
+      if (modal) modal.classList.remove('hidden');
+    }
+
+    function closeQuickCloseTripModal() {
+      var modal = document.getElementById('quickCloseTripModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function setQuickCloseTime(mode) {
+      var arriveInput = document.getElementById('quickCloseArriveTime');
+      var depTextEl = document.getElementById('quickCloseDepartText');
+      var depTime = depTextEl ? (depTextEl.dataset.departTime || '') : '';
+
+      if (mode === 'now') {
+        var now = new Date();
+        arriveInput.value = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
+      } else if (mode === '+30' || mode === '+45') {
+        var addMinutes = mode === '+30' ? 30 : 45;
+        var baseM = parseTimeToMinutes(depTime);
+        if (baseM === null) {
+          var now = new Date();
+          baseM = now.getHours() * 60 + now.getMinutes();
+        }
+        var targetM = baseM + addMinutes;
+        var ch = Math.floor(targetM / 60) % 24;
+        var cm = targetM % 60;
+        arriveInput.value = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+      }
+    }
+
+    function calcQuickCloseMileage() {
+      var startKmEl = document.getElementById('quickCloseStartKmText');
+      var startKm = Number(startKmEl ? (startKmEl.dataset.startKm || 0) : 0);
+      var endKmInput = document.getElementById('quickCloseEndKm');
+      var endKm = Number(endKmInput ? (endKmInput.value || 0) : 0);
+      var dist = Math.max(0, endKm - startKm);
+      var distEl = document.getElementById('quickCloseDistText');
+      if (distEl) {
+        distEl.innerText = `${dist.toLocaleString()} km`;
+      }
+    }
+
+    async function submitQuickCloseTrip(e) {
+      e.preventDefault();
+      var logId = Number(document.getElementById('quickCloseLogId').value);
+      var arriveTime = document.getElementById('quickCloseArriveTime').value.trim();
+      var endKm = Number(document.getElementById('quickCloseEndKm').value || 0);
+
+      var log = tripLogs.find(function(l) { return l.id === logId; });
+      if (!log) {
+        alert('운행일지 데이터를 찾을 수 없습니다.');
+        return;
+      }
+
+      if (!arriveTime) {
+        alert('도착 시각을 입력해주세요.');
+        return;
+      }
+
+      if (endKm < log.start_km) {
+        alert(`종료 계기판 거리(${endKm.toLocaleString()} km)는 출발 거리(${log.start_km.toLocaleString()} km)보다 작을 수 없습니다.`);
+        return;
+      }
+
+      var distanceKm = endKm - log.start_km;
+      if (distanceKm > 500) {
+        if (!confirm(`⚠️ 당일 주행거리가 ${distanceKm.toLocaleString()} km로 매우 큽니다. 오타가 아닌지 확인해주세요. 계속 저장하시겠습니까?`)) {
+          return;
+        }
+      }
+
+      var btn = document.getElementById('btnSubmitQuickClose');
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 마감 처리 중...';
+      }
+
+      try {
+        log.is_closed = true;
+        log.closed_at = arriveTime;
+        log.status = '운행마감';
+        log.end_km = endKm;
+        log.distance_km = distanceKm;
+        log.suggested_distance_km = distanceKm > 0 ? Number((distanceKm * 0.98).toFixed(1)) : 0;
+
+        // Update return stop in log.stops
+        if (Array.isArray(log.stops) && log.stops.length > 0) {
+          var returnStop = log.stops.find(function(s) { return s.type === 'return'; }) || log.stops[log.stops.length - 1];
+          if (returnStop) {
+            returnStop.status = '도착완료';
+            returnStop.arrive = arriveTime;
+            returnStop.end_km = endKm;
+            var stopStartKm = returnStop.start_km !== undefined ? Number(returnStop.start_km) : log.start_km;
+            returnStop.distance_km = Math.max(0, endKm - stopStartKm);
+          }
+
+          // Distribute distance across legs if needed
+          var hasOrig = (log.stops[0] && log.stops[0].type === 'origin');
+          var legStartIdx = hasOrig ? 1 : 0;
+          var legCnt = log.stops.length - legStartIdx;
+          if (legCnt > 0 && distanceKm > 0) {
+            var baseLegDist = Math.floor(distanceKm / legCnt);
+            var remLegDist = distanceKm % legCnt;
+            var runOdo = log.start_km;
+            for (var si = legStartIdx; si < log.stops.length; si++) {
+              var d = baseLegDist + ((si - legStartIdx) < remLegDist ? 1 : 0);
+              log.stops[si].distance_km = d;
+              log.stops[si].start_km = runOdo;
+              log.stops[si].end_km = runOdo + d;
+              runOdo += d;
+            }
+          }
+        }
+
+        if (supabaseClient) {
+          var payload = {
+            vehicle_no: log.vehicle_no,
+            trip_date: log.trip_date,
+            driver_name: log.driver_name,
+            start_km: log.start_km,
+            end_km: log.end_km,
+            distance_km: log.distance_km,
+            suggested_distance_km: log.suggested_distance_km,
+            is_local_departure: Boolean(log.is_local_departure),
+            origin_addr: log.origin_addr,
+            origin_name: log.origin_name,
+            is_local_dismissal: Boolean(log.is_local_dismissal),
+            destination_addr: log.destination_addr,
+            destination_name: log.destination_name,
+            parking_fee: log.parking_fee || 0,
+            fuel_fee: log.fuel_fee || 0,
+            is_unoperated: Boolean(log.is_unoperated),
+            is_closed: true,
+            closed_at: arriveTime,
+            stops: log.stops,
+            memo: log.memo
+          };
+
+          await supabaseClient.from('delivery_schedules')
+            .update({
+              status: '운행마감',
+              memo_special: JSON.stringify({ arrive: arriveTime }),
+              memo_full: JSON.stringify(payload)
+            })
+            .eq('id', log.id);
+
+          // Update vehiclesMaster current_km if this trip odo is higher
+          var vIdx = vehiclesMaster.findIndex(function(v) { return v.vehicle_no === log.vehicle_no; });
+          if (vIdx !== -1 && endKm > (vehiclesMaster[vIdx].current_km || 0)) {
+            vehiclesMaster[vIdx].current_km = endKm;
+            if (typeof saveVehiclesMaster === 'function') {
+              await saveVehiclesMaster();
+            }
+          }
+        }
+
+        closeQuickCloseTripModal();
+        await loadVehicleData(false);
+        showToast(`🎉 [${log.vehicle_no} / ${log.trip_date}] 운행이 정상적으로 마감(종료) 처리되었습니다.`);
+      } catch(err) {
+        console.error('Error quick closing trip:', err);
+        alert('운행 종료 처리 중 오류가 발생했습니다: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '<i class="fa-solid fa-flag-checkered"></i> <span>운행 종료(마감) 확정</span>';
+        }
+      }
     }
 
     // ==========================================
@@ -4023,6 +4370,10 @@
           }
         }
       }
+      var existingLog = tripLogs.find(function(l) { return l.id === Number(logId); });
+      var isClosedVal = existingLog ? Boolean(existingLog.is_closed) : false;
+      var closedAtVal = existingLog ? (existingLog.closed_at || '') : '';
+
       var logPayload = {
         vehicle_no: vehicleNo,
         trip_date: tripDate,
@@ -4041,6 +4392,8 @@
         parking_fee: parkingFee,
         fuel_fee: fuelFee,
         is_unoperated: isUnoperated,
+        is_closed: isClosedVal,
+        closed_at: closedAtVal,
         memo: memo
       };
 
@@ -4071,12 +4424,16 @@
 
           if (targetId) {
             // Update
+            var updateFields = {
+              delivery_date: tripDate,
+              driver_name: driverName,
+              memo_full: JSON.stringify(logPayload)
+            };
+            if (isClosedVal) {
+              updateFields.status = '운행마감';
+            }
             await supabaseClient.from('delivery_schedules')
-              .update({
-                delivery_date: tripDate,
-                driver_name: driverName,
-                memo_full: JSON.stringify(logPayload)
-              })
+              .update(updateFields)
               .eq('id', targetId);
           } else {
             // Insert
