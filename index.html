@@ -953,8 +953,8 @@
             <span>계약번호</span>
             <span class="text-[10px] text-slate-400 font-normal">Enter키로 즉시 저장</span>
           </label>
-          <input type="text" id="quickContractInput" placeholder="계약번호 입력 (예: C2026-0012)" onkeydown="if(event.key==='Enter')saveQuickContractEdit()" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-indigo-500 focus:bg-white text-indigo-900 transition">
-          <p class="text-[10px] text-slate-400 mt-1">※ '신규등록' 등의 임시 번호를 정규 계약번호로 변경할 수 있습니다.</p>
+          <input type="text" id="quickContractInput" placeholder="계약번호 입력 (예: 2501061480)" onkeydown="if(event.key==='Enter')saveQuickContractEdit()" class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono font-bold focus:outline-none focus:border-indigo-500 focus:bg-white text-indigo-900 transition">
+          <p class="text-[10px] text-slate-400 mt-1">※ '계약번호 없음' 등의 미입력 상태를 정규 계약번호로 변경할 수 있습니다.</p>
         </div>
       </div>
 
@@ -1244,9 +1244,17 @@
       </div>
 
       <div class="space-y-3">
-        <div>
-          <label class="block text-[11px] font-bold text-slate-600 mb-1">고객사명 *</label>
-          <input type="text" id="addCustName" placeholder="예: (주)알파비즈" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-bold">
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+              <i class="fa-solid fa-file-contract text-indigo-600"></i> 계약번호 <span class="text-[10px] text-slate-400 font-normal">(선택)</span>
+            </label>
+            <input type="text" id="addContractNo" placeholder="미입력 시 '계약번호 없음'" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-mono font-bold text-indigo-900">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-600 mb-1">고객사명 <span class="text-rose-500">*</span></label>
+            <input type="text" id="addCustName" placeholder="예: (주)알파비즈" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-bold">
+          </div>
         </div>
 
         <div class="grid grid-cols-2 gap-2">
@@ -2878,6 +2886,11 @@
     // ==========================================
     var contractHistoryIndexMap = new Map();
 
+    function isPlaceholderContractNo(val) {
+      var v = String(val || '').trim();
+      return !v || v === '신규등록' || v === '계약번호 없음' || v === '[계약번호 없음]' || v === '-';
+    }
+
     async function fetchContractHistoryIndex() {
       if (!supabaseClient) return;
       try {
@@ -2887,13 +2900,15 @@
           .not('contract_no', 'is', null)
           .neq('contract_no', '')
           .neq('contract_no', '신규등록')
+          .neq('contract_no', '계약번호 없음')
+          .neq('contract_no', '[계약번호 없음]')
           .order('delivery_date', { ascending: false });
 
         if (res.error) throw res.error;
         var map = new Map();
         (res.data || []).forEach(function(row) {
           var cNo = (row.contract_no || '').trim();
-          if (!cNo || cNo === '신규등록') return;
+          if (isPlaceholderContractNo(cNo)) return;
           if (!map.has(cNo)) map.set(cNo, []);
           map.get(cNo).push({
             id: row.id,
@@ -2914,7 +2929,7 @@
     }
 
     function getContractPastHistoryInfo(contractNo, currentId, currentDate) {
-      if (!contractNo || contractNo === '신규등록' || contractNo === '-') {
+      if (isPlaceholderContractNo(contractNo)) {
         return { count: 0, items: [] };
       }
       var key = contractNo.trim();
@@ -6756,7 +6771,7 @@
       }
 
       var manualStops = (records || []).filter(function(r) {
-        var isManual = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록';
+        var isManual = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록' || r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]';
         var recDate = r.배송일자 || r.delivery_date;
         return isManual && isSameDate(recDate, targetDate);
       });
@@ -7145,7 +7160,7 @@
 
             // 1. 기존 트래킹 정보 (출발/도착 시간, 완료 상태, 기사 등) 맵 구축
             targetRows.forEach(function(row) {
-              var key1 = (row.contract_no && row.contract_no !== '신규등록') ? row.contract_no.trim() : null;
+              var key1 = (!isPlaceholderContractNo(row.contract_no)) ? row.contract_no.trim() : null;
               var key2 = (row.customer_name ? row.customer_name.trim() : '') + '|||' + (row.address ? row.address.trim() : '');
 
               var trackInfo = {
@@ -7165,12 +7180,13 @@
             // 2. 수기 등록 배송지 추출
             if (keepManual) {
               dbManualStops = targetRows.filter(function(row) {
-                return row.source_sheet === '직접추가' || row.contract_no === '신규등록';
+                return row.source_sheet === '직접추가' || row.contract_no === '신규등록' || row.contract_no === '계약번호 없음' || row.contract_no === '[계약번호 없음]';
               }).map(function(row) {
+                var normContract = (row.contract_no && row.contract_no !== '신규등록' && row.contract_no !== '[계약번호 없음]') ? row.contract_no : '계약번호 없음';
                 return {
                   ID: row.id,
                   배송일자: row.delivery_date || targetDate,
-                  계약번호: row.contract_no || '신규등록',
+                  계약번호: normContract,
                   구분: row.category || '배송',
                   담당기사: row.driver_name || '',
                   고객사: row.customer_name || '',
@@ -7194,7 +7210,7 @@
 
             // 3. 당일 기존 진행/완료 배송지 추출 (이미 출발/도착했거나 완료된 배송지는 새 CSV에 없더라도 100% 무조건 보존)
             var dbProgressedStops = targetRows.filter(function(row) {
-              if (row.source_sheet === '직접추가' || row.contract_no === '신규등록') return false; // 수동 추가는 별도 처리
+              if (row.source_sheet === '직접추가' || row.contract_no === '신규등록' || row.contract_no === '계약번호 없음' || row.contract_no === '[계약번호 없음]') return false; // 수동 추가는 별도 처리
               var hasTimes = false;
               if (row.memo_special) {
                 try {
@@ -7237,7 +7253,7 @@
       // 로컬 records에서도 트래킹 정보 및 수동 배송지 보조 감지
       if (records && records.length > 0) {
         records.forEach(function(r) {
-          var k1 = (r.계약번호 && r.계약번호 !== '신규등록') ? r.계약번호.trim() : null;
+          var k1 = (!isPlaceholderContractNo(r.계약번호)) ? r.계약번호.trim() : null;
           var k2 = (r.고객사 ? r.고객사.trim() : '') + '|||' + (r.주소 ? r.주소.trim() : '');
           if ((r.memo_special || r.의뢰상태 === '완료' || r.의뢰상태 === '배송완료' || r.의뢰상태 === '도착완료' || r.의뢰상태 === '수령완료') && !existingTrackingMap[k1] && !existingTrackingMap[k2]) {
             var info = {
@@ -7261,7 +7277,7 @@
       var localManualStops = [];
       if (keepManual && records && records.length > 0) {
         localManualStops = records.filter(function(r) {
-          var isManual = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록';
+          var isManual = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록' || r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]';
           var recDate = r.배송일자 || r.delivery_date;
           return isManual && isSameDate(recDate, targetDate);
         });
@@ -7282,7 +7298,7 @@
       // 수동 배송지를 merged에 추가
       allManualStops.forEach(function(m) {
         var isDup = merged.some(function(c) {
-          return (c.계약번호 && m.계약번호 && c.계약번호 !== '신규등록' && c.계약번호 === m.계약번호)
+          return (!isPlaceholderContractNo(c.계약번호) && !isPlaceholderContractNo(m.계약번호) && c.계약번호 === m.계약번호)
                  || (c.고객사 === m.고객사 && c.주소 === m.주소);
         });
         if (!isDup) {
@@ -7301,7 +7317,7 @@
       if (dbProgressedStops && dbProgressedStops.length > 0) {
         dbProgressedStops.forEach(function(prog) {
           var isDup = merged.some(function(c) {
-            return (c.계약번호 && prog.계약번호 && c.계약번호 !== '신규등록' && c.계약번호 === prog.계약번호)
+            return (!isPlaceholderContractNo(c.계약번호) && !isPlaceholderContractNo(prog.계약번호) && c.계약번호 === prog.계약번호)
                    || (c.고객사 && prog.고객사 && c.고객사.trim() === prog.고객사.trim() && c.주소 && prog.주소 && c.주소.trim() === prog.주소.trim());
           });
           if (!isDup) {
@@ -7316,7 +7332,7 @@
       // ────────────────────────────────────────────────────────────────────
       var restoredTimeCount = 0;
       merged.forEach(function(r) {
-        var k1 = (r.계약번호 && r.계약번호 !== '신규등록') ? r.계약번호.trim() : null;
+        var k1 = (!isPlaceholderContractNo(r.계약번호)) ? r.계약번호.trim() : null;
         var k2 = (r.고객사 ? r.고객사.trim() : '') + '|||' + (r.주소 ? r.주소.trim() : '');
         var matchedTrack = (k1 && existingTrackingMap[k1]) || existingTrackingMap[k2];
 
@@ -7636,11 +7652,13 @@
           </td>
           <td class="py-2.5 px-3 font-mono">
             <div class="flex items-center gap-1.5 group/contract">
-              ${r.계약번호 ? `
+              ${!isPlaceholderContractNo(r.계약번호) ? `
                 <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="text-indigo-600 hover:text-indigo-900 hover:underline font-bold text-xs flex items-center gap-1 truncate max-w-[110px]" title="계약번호 [${r.계약번호}] 과거 이력 및 현장 메모 조회">
                   <span>${r.계약번호}</span>
                   <i class="fa-solid fa-clock-rotate-left text-[10px] text-indigo-400"></i>
                 </button>
+              ` : (r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]' || r.계약번호 === '신규등록' || r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가') ? `
+                <span class="text-slate-400 font-bold text-xs whitespace-nowrap font-sans">계약번호 없음</span>
               ` : `<span class="text-slate-400 text-xs">-</span>`}
               ${!isDriverUser ? `
                 <button type="button" onclick="openQuickContractEditModal(${realIdx})" class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="계약번호 수정/입력">
@@ -7662,7 +7680,7 @@
           <td class="py-2.5 px-3 font-bold text-slate-900">
             <div class="flex items-center gap-1.5 flex-wrap">
               <span>${r.고객사}</span>
-              ${(r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록') ? '<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-black border border-amber-300 shrink-0 shadow-2xs" title="직접 추가된 배송지 (CSV 등록 시 자동 보존)">직접추가</span>' : ''}
+              ${(r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록' || r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]') ? '<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-black border border-amber-300 shrink-0 shadow-2xs" title="직접 추가된 배송지 (CSV 등록 시 자동 보존)">직접추가</span>' : ''}
             </div>
           </td>
           <td class="py-2.5 px-3.5 text-slate-600 max-w-xs truncate" title="${r.주소}">${r.주소}</td>
@@ -8368,13 +8386,20 @@
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 flex-wrap">
               <input type="checkbox" class="row-checkbox w-4 h-4 rounded text-indigo-600 cursor-pointer" data-id="${r.ID || ''}" data-idx="${realIdx}" onchange="onRowCheckboxChange()">
-              ${r.계약번호 ? `
+              ${!isPlaceholderContractNo(r.계약번호) ? `
                 <div class="flex items-center gap-1">
                   <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="font-mono text-indigo-600 hover:text-indigo-900 font-black text-[11px] flex items-center gap-0.5 truncate max-w-[100px]" title="계약번호 [${r.계약번호}] 이력 조회">
                     <span>${r.계약번호}</span>
                     <i class="fa-solid fa-clock-rotate-left text-[9px] text-indigo-400"></i>
                   </button>
                   <button type="button" onclick="openQuickContractEditModal(${realIdx})" class="p-0.5 text-slate-400 hover:text-indigo-600" title="계약번호 수정">
+                    <i class="fa-solid fa-pen-to-square text-[10px]"></i>
+                  </button>
+                </div>
+              ` : (r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]' || r.계약번호 === '신규등록' || r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가') ? `
+                <div class="flex items-center gap-1">
+                  <span class="text-slate-400 text-[11px] font-bold whitespace-nowrap">계약번호 없음</span>
+                  <button type="button" onclick="openQuickContractEditModal(${realIdx})" class="p-0.5 text-slate-400 hover:text-indigo-600" title="계약번호 입력">
                     <i class="fa-solid fa-pen-to-square text-[10px]"></i>
                   </button>
                 </div>
@@ -8407,7 +8432,7 @@
           <div>
             <h4 class="font-black text-slate-900 text-sm leading-tight flex items-center gap-1.5 flex-wrap">
               <span>${r.고객사 || '고객사 미정'}</span>
-              ${(r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록') ? '<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-black border border-amber-300 shrink-0">직접추가</span>' : ''}
+              ${(r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가' || r.계약번호 === '신규등록' || r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]') ? '<span class="px-1.5 py-0.5 bg-amber-100 text-amber-800 rounded text-[10px] font-black border border-amber-300 shrink-0">직접추가</span>' : ''}
             </h4>
             <p class="text-xs text-slate-600 font-medium pt-1 flex items-start gap-1">
               <i class="fa-solid fa-location-dot text-rose-500 mt-0.5 shrink-0"></i>
@@ -8815,7 +8840,7 @@
       }
       var inputEl = document.getElementById('quickContractInput');
       if (inputEl) {
-        inputEl.value = r.계약번호 || '';
+        inputEl.value = isPlaceholderContractNo(r.계약번호) ? '' : (r.계약번호 || '');
         setTimeout(function() {
           inputEl.focus();
           inputEl.select();
@@ -8835,7 +8860,9 @@
       if (idx < 0 || idx >= records.length) return;
       var r = records[idx];
       var inputEl = document.getElementById('quickContractInput');
-      var newContractNo = inputEl ? inputEl.value.trim() : '';
+      var rawVal = inputEl ? inputEl.value.trim() : '';
+      var isManualStop = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가';
+      var newContractNo = rawVal || (isManualStop ? '계약번호 없음' : '');
 
       r.계약번호 = newContractNo;
       closeQuickContractEditModal();
@@ -8850,7 +8877,7 @@
           }).eq('id', r.ID);
           if (res.error) throw res.error;
           lastDataHash = '';
-          showToast('✅ 계약번호가 [' + (newContractNo || '없음') + ']으로 저장되었습니다.');
+          showToast('✅ 계약번호가 [' + (newContractNo || '계약번호 없음') + ']으로 저장되었습니다.');
         } catch (e) {
           console.error('계약번호 DB 저장 오류:', e);
           showToast('⚠️ DB 저장 중 오류가 발생했습니다: ' + (e.message || e));
@@ -8874,7 +8901,7 @@
       var r = records[idx];
       document.getElementById('editStopIndex').value = idx;
       var contractInput = document.getElementById('editContractNo');
-      if (contractInput) contractInput.value = r.계약번호 || '';
+      if (contractInput) contractInput.value = isPlaceholderContractNo(r.계약번호) ? '' : (r.계약번호 || '');
       document.getElementById('editCustName').value = r.고객사 || '';
       document.getElementById('editType').value = r.구분 || '배송';
       document.getElementById('editMethod').value = r.배송방법 || '직배송';
@@ -8902,8 +8929,11 @@
       var idx = parseInt(document.getElementById('editStopIndex').value, 10);
       if (idx < 0 || idx >= records.length) return;
 
+      var r = records[idx];
+      var isManualStop = r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가';
       var contractNoInput = document.getElementById('editContractNo');
-      var contractNo = contractNoInput ? contractNoInput.value.trim() : (records[idx].계약번호 || '');
+      var rawContractNo = contractNoInput ? contractNoInput.value.trim() : (r.계약번호 || '');
+      var contractNo = rawContractNo || (isManualStop ? '계약번호 없음' : '');
       var cust = document.getElementById('editCustName').value.trim();
       var addr = document.getElementById('editAddr').value.trim();
       var detail = document.getElementById('editDetailAddr').value.trim();
@@ -8925,7 +8955,6 @@
         return;
       }
 
-      var r = records[idx];
       r.계약번호 = contractNo;
       r.고객사 = cust;
       r.기본주소 = addr;
@@ -9111,6 +9140,8 @@
     }
 
     function openAddStopModal() {
+      var addContractEl = document.getElementById('addContractNo');
+      if (addContractEl) addContractEl.value = '';
       document.getElementById('addCustName').value = '';
       document.getElementById('addType').value = '배송';
       document.getElementById('addMethod').value = '직배송';
@@ -9131,6 +9162,10 @@
     }
 
     function saveAddStopModal() {
+      var addContractEl = document.getElementById('addContractNo');
+      var rawContractNo = addContractEl ? addContractEl.value.trim() : '';
+      var finalContractNo = rawContractNo || '계약번호 없음';
+
       var cust = document.getElementById('addCustName').value.trim();
       var addr = document.getElementById('addAddr').value.trim();
       var detail = document.getElementById('addDetailAddr').value.trim();
@@ -9166,7 +9201,7 @@
       var newRecord = {
         ID: Date.now(),
         배송일자: chosenDate,
-        계약번호: '신규등록',
+        계약번호: finalContractNo,
         구분: type,
         담당기사: assignedDriver,
         고객사: cust,
@@ -9207,8 +9242,17 @@
           delivery_method: newRecord.배송방법,
           memo_full: newRecord.비고_전문,
           source_sheet: '직접추가'
-        }]).then(function(res) {
-          if (res.error) console.error('DB Insert error:', res.error);
+        }]).select().then(function(res) {
+          if (res.error) {
+            console.error('DB Insert error:', res.error);
+          } else {
+            if (res.data && res.data.length > 0 && res.data[0].id) {
+              newRecord.ID = res.data[0].id;
+            }
+            if (!isPlaceholderContractNo(newRecord.계약번호)) {
+              fetchContractHistoryIndex();
+            }
+          }
         });
       }
 
@@ -9864,10 +9908,15 @@
         });
 
         var fetchedRecords = data.map(function(row) {
+          var isMan = (row.source_sheet === '직접추가' || row.contract_no === '신규등록' || row.contract_no === '계약번호 없음' || row.contract_no === '[계약번호 없음]');
+          var normContractNo = row.contract_no || '';
+          if (normContractNo === '신규등록' || normContractNo === '[계약번호 없음]' || (isMan && !normContractNo)) {
+            normContractNo = '계약번호 없음';
+          }
           return {
             ID: row.id,
             배송일자: row.delivery_date || '',
-            계약번호: row.contract_no || '',
+            계약번호: normContractNo,
             구분: row.category || '배송',
             담당기사: row.driver_name || '',
             고객사: row.customer_name || '',
@@ -9885,7 +9934,7 @@
             비고_전문: row.memo_full || '',
             원본시트: row.source_sheet || '',
             source_sheet: row.source_sheet || '',
-            isManual: (row.source_sheet === '직접추가' || row.contract_no === '신규등록'),
+            isManual: isMan,
             stop_order: (row.stop_order !== null && row.stop_order !== undefined) ? Number(row.stop_order) : null
           };
         });
@@ -9901,6 +9950,7 @@
           fetchedRecords.forEach(function(r) {
             if (r.ID && localPendingMap.has(r.ID)) {
               var local = localPendingMap.get(r.ID);
+              r.계약번호 = local.계약번호;
               r.담당기사 = local.담당기사;
               r.추후일정_특이사항 = local.추후일정_특이사항;
               r.의뢰상태 = local.의뢰상태;
