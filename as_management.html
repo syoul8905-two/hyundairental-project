@@ -234,6 +234,27 @@
           </div>
         </div>
 
+        <!-- 고객사 담당자명 & 전화번호 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mb-2">
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+              <i class="fa-solid fa-user-tie text-indigo-500 text-[10px]"></i>
+              <span>고객사 담당자명</span>
+            </label>
+            <input type="text" id="inputContactName" placeholder="예: 홍길동 대리 / 담당자 성함" 
+                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
+          </div>
+          <div>
+            <label class="block text-[11px] font-bold text-slate-700 mb-1 flex items-center gap-1">
+              <i class="fa-solid fa-phone text-emerald-600 text-[10px]"></i>
+              <span>담당자 전화번호</span>
+            </label>
+            <input type="tel" id="inputContactPhone" placeholder="예: 010-1234-5678" 
+                   oninput="onContactPhoneInput(this)"
+                   class="w-full bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 font-bold font-mono text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
+          </div>
+        </div>
+
         <!-- Contract Unified History Summary Banner (Appears when contract is recognized) -->
         <div id="contractHistoryBanner" class="hidden mb-2 p-2 bg-indigo-50/80 rounded-xl border border-indigo-200 text-[11px] flex items-center justify-between">
           <div class="flex items-center gap-1.5 text-indigo-900 font-bold truncate">
@@ -440,7 +461,7 @@
           <!-- Multi-column Search Input -->
           <div class="relative flex-1 min-w-[200px]">
             <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"></i>
-            <input type="text" id="searchInput" oninput="renderAsList()" placeholder="계약번호, 자산번호, 고객사명, 증상, 처리자 검색..." 
+            <input type="text" id="searchInput" oninput="renderAsList()" placeholder="계약번호, 자산번호, 고객사명, 담당자/전화번호, 증상, 처리자 검색..." 
                    class="w-full bg-slate-50 border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 font-bold text-xs text-slate-800 focus:bg-white focus:outline-none focus:border-indigo-500 transition">
           </div>
 
@@ -768,7 +789,7 @@
       try {
         var res = await supabaseClient
           .from('delivery_schedules')
-          .select('contract_no, customer_name, delivery_date, category, driver_name, items, memo_full, memo_special, address, source_sheet')
+          .select('contract_no, customer_name, contact, delivery_date, category, driver_name, items, memo_full, memo_special, address, source_sheet')
           .neq('source_sheet', 'SYSTEM_CONFIG_USERS')
           .neq('source_sheet', 'SYSTEM_CONFIG_DRIVER_ORIGINS')
           .neq('source_sheet', 'SYSTEM_CONFIG_CUSTOMER_HANDOVERS')
@@ -1222,6 +1243,94 @@
       textarea.focus();
     }
 
+    // ────────────────────────────────────────────────────────────────
+    // [고객사 담당자명 & 전화번호 포맷팅 / 파싱 / 자동완성 헬퍼]
+    // ────────────────────────────────────────────────────────────────
+    function formatKoreanPhone(raw) {
+      var str = String(raw || '');
+      if (!str.trim()) return '';
+      // 숫자·하이픈·공백 외 문자가 섞여 있으면(내선번호 등) 원문 유지
+      if (!/^[\d\s-]+$/.test(str)) return str;
+      var d = str.replace(/\D/g, '');
+      if (!d) return '';
+      if (d.indexOf('02') === 0) {
+        if (d.length <= 2) return d;
+        if (d.length <= 5) return d.slice(0, 2) + '-' + d.slice(2);
+        if (d.length <= 9) return d.slice(0, 2) + '-' + d.slice(2, d.length - 4) + '-' + d.slice(d.length - 4);
+        return d.slice(0, 2) + '-' + d.slice(2, 6) + '-' + d.slice(6, 10);
+      }
+      if (d.length === 8 && /^(15|16|18)/.test(d)) {
+        return d.slice(0, 4) + '-' + d.slice(4, 8);
+      }
+      if (d.length <= 3) return d;
+      if (d.length <= 6) return d.slice(0, 3) + '-' + d.slice(3);
+      if (d.length <= 10) return d.slice(0, 3) + '-' + d.slice(3, d.length - 4) + '-' + d.slice(d.length - 4);
+      return d.slice(0, 3) + '-' + d.slice(3, 7) + '-' + d.slice(7, 11);
+    }
+
+    function onContactPhoneInput(el) {
+      if (!el) return;
+      el.value = formatKoreanPhone(el.value);
+    }
+
+    function extractAsContactInfo(r, p) {
+      if (!p && r && r.memo_special) {
+        try { p = JSON.parse(r.memo_special); } catch (e) { p = {}; }
+      }
+      p = p || {};
+      var cName = (p.contact_name || '').trim();
+      var cPhone = (p.contact_phone || '').trim();
+      var rawContact = (r && r.contact ? String(r.contact).trim() : '') || (p.contact ? String(p.contact).trim() : '');
+      if (!cName && !cPhone && rawContact && rawContact !== '-') {
+        var phoneMatch = rawContact.match(/(0\d{1,2}-\d{3,4}-\d{4}|0\d{8,10}|1[568]\d{2}-\d{4})/);
+        if (phoneMatch) {
+          cPhone = formatKoreanPhone(phoneMatch[1]);
+          cName = rawContact.replace(phoneMatch[1], '').replace(/^[\/\s,·()-]+|[\/\s,·()-]+$/g, '').trim();
+        } else {
+          cName = rawContact;
+        }
+      }
+      var display = [cName, cPhone].filter(Boolean).join(' ');
+      return {
+        name: cName,
+        phone: cPhone,
+        display: display
+      };
+    }
+
+    function tryAutofillContactInfo(contractNo, customerName) {
+      var nameInp = document.getElementById('inputContactName');
+      var phoneInp = document.getElementById('inputContactPhone');
+      if (!nameInp || !phoneInp) return;
+      if (nameInp.value.trim() || phoneInp.value.trim()) return;
+
+      var cNo = (contractNo || '').trim().toUpperCase();
+      var cName = (customerName || '').trim();
+      var pool = asRecords.concat(allDeliveryRecords || []);
+
+      var found = null;
+      if (cNo) {
+        for (var i = 0; i < pool.length; i++) {
+          if ((pool[i].contract_no || '').trim().toUpperCase() === cNo) {
+            var info = extractAsContactInfo(pool[i]);
+            if (info.name || info.phone) { found = info; break; }
+          }
+        }
+      }
+      if (!found && cName) {
+        for (var j = 0; j < pool.length; j++) {
+          if ((pool[j].customer_name || '').trim() === cName) {
+            var info2 = extractAsContactInfo(pool[j]);
+            if (info2.name || info2.phone) { found = info2; break; }
+          }
+        }
+      }
+      if (found) {
+        if (found.name) nameInp.value = found.name;
+        if (found.phone) phoneInp.value = found.phone;
+      }
+    }
+
     // Autocomplete: Contract No
     function onContractInput(val) {
       var q = (val || '').trim().toUpperCase();
@@ -1272,6 +1381,7 @@
         showCustomerHandoverCard(customer);
       }
 
+      tryAutofillContactInfo(contract, customer || document.getElementById('inputCustomerName').value);
       checkContractHistorySummary(contract);
     }
 
@@ -1337,6 +1447,7 @@
       document.getElementById('inputCustomerName').value = customer;
       document.getElementById('customerDropdown').classList.add('hidden');
       showCustomerHandoverCard(customer);
+      tryAutofillContactInfo(document.getElementById('inputContractNo').value, customer);
     }
 
     // Show Customer Handover Card
@@ -1465,6 +1576,9 @@
       }
       var assetNo = currentAssetTags.join(', ');
       var customerName = (document.getElementById('inputCustomerName').value || '').trim();
+      var contactName = (document.getElementById('inputContactName') ? document.getElementById('inputContactName').value : '').trim();
+      var contactPhone = (document.getElementById('inputContactPhone') ? document.getElementById('inputContactPhone').value : '').trim();
+      var combinedContact = [contactName, contactPhone].filter(Boolean).join(' ');
       var symptom = (document.getElementById('inputSymptom').value || '').trim();
       var category = document.getElementById('inputCategory').value;
       var status = document.getElementById('inputStatus').value;
@@ -1511,12 +1625,15 @@
         });
       }
 
-      // Pack special JSON for asset & symptom & dates
+      // Pack special JSON for asset & symptom & dates & contact
       var specialObj = {
         asset_no: assetNo,
         asset_nos: currentAssetTags,
         replacements: replacementsList,
         symptom: symptom,
+        contact_name: contactName,
+        contact_phone: contactPhone,
+        contact: combinedContact,
         receipt_date: receiptDate,
         processed_date: processedDate,
         processed_at: new Date().toISOString()
@@ -1525,6 +1642,7 @@
       var payload = {
         contract_no: contractNo,
         customer_name: customerName,
+        contact: combinedContact,
         category: category,
         status: status,
         delivery_date: receiptDate, // 접수일자를 메인 일자(delivery_date)로 보존하여 시간순 정렬 유지
@@ -1583,6 +1701,8 @@
       document.getElementById('editRecordId').value = '';
       document.getElementById('inputContractNo').value = '';
       document.getElementById('inputCustomerName').value = '';
+      if (document.getElementById('inputContactName')) document.getElementById('inputContactName').value = '';
+      if (document.getElementById('inputContactPhone')) document.getElementById('inputContactPhone').value = '';
       currentReplacements = {};
       var mappingSec = document.getElementById('replacementMappingSection');
       if (mappingSec) mappingSec.classList.add('hidden');
@@ -1638,6 +1758,10 @@
 
       if (!receiptDate) receiptDate = r.delivery_date || '';
       if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
+
+      var cInfo = extractAsContactInfo(r, p);
+      if (document.getElementById('inputContactName')) document.getElementById('inputContactName').value = cInfo.name || '';
+      if (document.getElementById('inputContactPhone')) document.getElementById('inputContactPhone').value = cInfo.phone || '';
 
       document.getElementById('inputReceiptDate').value = receiptDate;
       document.getElementById('inputProcessedDate').value = processedDate;
@@ -1748,9 +1872,10 @@
           var receiptDate = '';
           var processedDate = '';
           var replacementKeywords = [];
+          var p = {};
           if (r.memo_special) {
             try {
-              var p = JSON.parse(r.memo_special);
+              p = JSON.parse(r.memo_special);
               assetNo = p.asset_no || '';
               symptom = p.symptom || '';
               receiptDate = p.receipt_date || '';
@@ -1764,6 +1889,7 @@
             } catch (e) {}
           }
           if (!receiptDate) receiptDate = r.delivery_date || '';
+          var cInfoSearch = extractAsContactInfo(r, p);
 
           var haystack = [
             r.contract_no || '',
@@ -1775,6 +1901,9 @@
             processedDate,
             assetNo,
             symptom,
+            cInfoSearch.name || '',
+            cInfoSearch.phone || '',
+            (cInfoSearch.phone || '').replace(/-/g, ''),
             replacementKeywords.join(' ')
           ].join(' ').toLowerCase();
 
@@ -1817,6 +1946,15 @@
         }
         if (!receiptDate) receiptDate = r.delivery_date || '-';
         if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
+
+        var cInfo = extractAsContactInfo(r, p);
+        var contactBadgeHtml = '';
+        if (cInfo.name || cInfo.phone) {
+          var telHref = cInfo.phone ? `tel:${cInfo.phone.replace(/[^0-9+]/g, '')}` : '';
+          contactBadgeHtml = telHref
+            ? `<a href="${telHref}" onclick="event.stopPropagation()" class="inline-flex items-center gap-1 text-emerald-800 font-bold text-[10.5px] bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 transition shadow-2xs" title="고객사 담당자 전화 연결"><i class="fa-solid fa-phone-volume text-[9px] text-emerald-600"></i>${cInfo.name ? `<span>${cInfo.name}</span>` : ''}${cInfo.phone ? `<span class="font-mono font-black">${cInfo.phone}</span>` : ''}</a>`
+            : `<span class="inline-flex items-center gap-1 text-slate-700 font-bold text-[10.5px] bg-white px-1.5 py-0.5 rounded border border-slate-200 shadow-2xs" title="고객사 담당자"><i class="fa-solid fa-user-tie text-[9px] text-slate-500"></i><span>${cInfo.name}</span></span>`;
+        }
 
         var assetBadgeHtml = '';
         if (assetList.length === 1) {
@@ -1878,6 +2016,7 @@
                 <span class="font-black text-slate-900 text-xs">${r.customer_name || '-'}</span>
                 <span class="font-mono text-indigo-700 font-bold text-[11px] bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">계약: ${r.contract_no || '-'}</span>
                 ${assetBadgeHtml}
+                ${contactBadgeHtml}
               </div>
               <div class="flex items-center gap-2 text-[11px] text-slate-500 font-bold flex-wrap">
                 <span title="A/S 접수일자"><i class="fa-regular fa-calendar-plus text-indigo-500"></i> 접수: <b class="text-slate-800">${receiptDate}</b></span>
@@ -2048,9 +2187,10 @@
             var symptom = '';
             var receiptDate = '';
             var processedDate = '';
+            var p = {};
             if (row.memo_special) {
               try {
-                var p = JSON.parse(row.memo_special);
+                p = JSON.parse(row.memo_special);
                 assetNo = p.asset_no || '';
                 assetList = p.asset_nos || (assetNo ? assetNo.split(/,\s*/).filter(Boolean) : []);
                 symptom = p.symptom || '';
@@ -2060,6 +2200,15 @@
             }
             if (!receiptDate) receiptDate = row.delivery_date || '-';
             if (!processedDate && row.status === '처리완료') processedDate = row.delivery_date || '';
+
+            var tlContact = extractAsContactInfo(row, p);
+            var tlContactBadge = '';
+            if (tlContact.name || tlContact.phone) {
+              var tlHref = tlContact.phone ? `tel:${tlContact.phone.replace(/[^0-9+]/g, '')}` : '';
+              tlContactBadge = tlHref
+                ? `<a href="${tlHref}" class="text-[10px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 inline-flex items-center gap-1"><i class="fa-solid fa-phone-volume text-[9px] text-emerald-600"></i>${tlContact.name ? `<span>${tlContact.name}</span>` : ''}${tlContact.phone ? `<span class="font-mono font-black">${tlContact.phone}</span>` : ''}</a>`
+                : `<span class="text-[10px] font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200 inline-flex items-center gap-1"><i class="fa-solid fa-user-tie text-[9px] text-slate-500"></i><span>${tlContact.name}</span></span>`;
+            }
 
             var tlAssetBadge = '';
             if (assetList.length === 1) {
@@ -2084,6 +2233,7 @@
                       <span class="font-bold text-slate-800 text-xs">접수: ${receiptDate}</span>
                       ${processedDate ? `<span class="text-[10px] font-bold text-emerald-800 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">처리: ${processedDate}</span>` : '<span class="text-[10px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200">처리대기</span>'}
                       ${tlAssetBadge}
+                      ${tlContactBadge}
                     </div>
                     <span class="text-[10px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                       처리자: ${driver}
@@ -2113,6 +2263,14 @@
             // Delivery / Setup Record Card
             var items = row.items || row.품목_수량 || '';
             var addr = row.address || row.주소 || '';
+            var delContact = extractAsContactInfo(row);
+            var delContactBadge = '';
+            if (delContact.name || delContact.phone) {
+              var delHref = delContact.phone ? `tel:${delContact.phone.replace(/[^0-9+]/g, '')}` : '';
+              delContactBadge = delHref
+                ? `<a href="${delHref}" class="text-[10px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 inline-flex items-center gap-1"><i class="fa-solid fa-phone-volume text-[9px] text-emerald-600"></i>${delContact.name ? `<span>${delContact.name}</span>` : ''}${delContact.phone ? `<span class="font-mono font-black">${delContact.phone}</span>` : ''}</a>`
+                : `<span class="text-[10px] font-bold text-slate-700 bg-white px-1.5 py-0.5 rounded border border-slate-200 inline-flex items-center gap-1"><i class="fa-solid fa-user-tie text-[9px] text-slate-500"></i><span>${delContact.name}</span></span>`;
+            }
             var dotBg = 'bg-indigo-500';
             var cardBorder = 'border-indigo-200 bg-indigo-50/30';
 
@@ -2121,11 +2279,12 @@
                 <span class="absolute -left-[23px] top-1.5 w-3.5 h-3.5 rounded-full ${dotBg} border-2 border-white ring-2 ring-slate-100"></span>
                 <div class="p-3 rounded-2xl border ${cardBorder} space-y-1.5 shadow-2xs">
                   <div class="flex items-center justify-between flex-wrap gap-1">
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5 flex-wrap">
                       <span class="px-2 py-0.5 rounded text-[10px] font-black bg-indigo-100 text-indigo-900 border border-indigo-200 flex items-center gap-1">
                         <i class="fa-solid fa-box"></i> 배송·설치 [${cat}]
                       </span>
                       <span class="font-bold text-slate-800 text-xs">${date}</span>
+                      ${delContactBadge}
                     </div>
                     <span class="text-[10px] font-bold text-slate-600 bg-white px-2 py-0.5 rounded-md border border-slate-200">
                       담당기사: ${driver}
@@ -2318,9 +2477,10 @@
       var symptom = '';
       var receiptDate = '';
       var processedDate = '';
+      var p = {};
       if (r.memo_special) {
         try {
-          var p = JSON.parse(r.memo_special);
+          p = JSON.parse(r.memo_special);
           assetNo = p.asset_no || '';
           assetList = p.asset_nos || (assetNo ? assetNo.split(/,\s*/).filter(Boolean) : []);
           symptom = p.symptom || '';
@@ -2330,6 +2490,15 @@
       }
       if (!receiptDate) receiptDate = r.delivery_date || '-';
       if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
+
+      var cInfo = extractAsContactInfo(r, p);
+      var contactStr = '';
+      if (cInfo.name || cInfo.phone) {
+        var telLink = cInfo.phone
+          ? `<a href="tel:${cInfo.phone.replace(/[^0-9+]/g, '')}" class="font-mono text-emerald-800 bg-emerald-50 hover:bg-emerald-100 px-1.5 py-0.5 rounded border border-emerald-200 font-black inline-flex items-center gap-1"><i class="fa-solid fa-phone-volume text-[9px] text-emerald-600"></i>${cInfo.phone}</a>`
+          : '';
+        contactStr = `· 고객담당: <span class="text-slate-900 font-black">${cInfo.name || '-'}</span> ${telLink}`;
+      }
 
       var assetStr = '';
       if (assetList.length === 1) {
@@ -2390,7 +2559,7 @@
           <span>구분: <b class="text-indigo-600">${r.category}</b> (${r.status})</span>
           <span>접수일: <b>${receiptDate}</b> ${processedDate ? `· 처리일: <b>${processedDate}</b>` : '· (미처리)'} · 처리자: <b>${r.driver_name || '-'}</b></span>
         </div>
-        <div class="font-bold text-slate-700 flex items-center gap-1.5 flex-wrap">계약번호: <span class="font-mono text-indigo-700">${r.contract_no}</span> ${assetStr}</div>
+        <div class="font-bold text-slate-700 flex items-center gap-1.5 flex-wrap">계약번호: <span class="font-mono text-indigo-700">${r.contract_no}</span> ${assetStr} ${contactStr}</div>
         <div class="font-bold text-rose-700">증상: ${symptom || '-'}</div>
         ${repMetaHtml}
       `;
@@ -2416,9 +2585,10 @@
         var receiptDate = '';
         var processedDate = '';
         var repSummary = '';
+        var p = {};
         if (r.memo_special) {
           try {
-            var p = JSON.parse(r.memo_special);
+            p = JSON.parse(r.memo_special);
             assetNo = p.asset_no || (p.asset_nos ? p.asset_nos.join(', ') : '');
             symptom = p.symptom || '';
             receiptDate = p.receipt_date || '';
@@ -2432,6 +2602,7 @@
         }
         if (!receiptDate) receiptDate = r.delivery_date || '';
         if (!processedDate && r.status === '처리완료') processedDate = r.delivery_date || '';
+        var cInfo = extractAsContactInfo(r, p);
 
         return {
           'No': idx + 1,
@@ -2441,6 +2612,8 @@
           '상태': r.status || '',
           '고객사명': r.customer_name || '',
           '계약번호': r.contract_no || '',
+          '고객사담당자': cInfo.name || '',
+          '담당자연락처': cInfo.phone || '',
           '자산번호': assetNo,
           '교체장비_매핑내역': repSummary,
           '증상': symptom,
