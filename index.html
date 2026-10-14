@@ -6912,6 +6912,7 @@
           });
           var driverIndices = findColIndices(['배송담당', '담당기사', '기사']);
           var dateIndices = findColIndices(['배송예정일자', '배송일자', '일자']);
+          var methodIndices = findColIndices(['배송방법', '배송방식', '배송구분', '방법', 'delivery_method', 'method']);
 
           function getRowValue(r, indices) {
             for (var i = 0; i < indices.length; i++) {
@@ -6954,49 +6955,92 @@
               return;
             }
 
-            // 퀵(quick), 택배(delivery), 전산(install), 방문수령, 직배송 판별
-            var isQuick = (rowText.indexOf('퀵') !== -1 || rowText.indexOf('quick') !== -1);
-            var isDeliveryExpress = (rowText.indexOf('택배') !== -1 || rowText.indexOf('delivery') !== -1);
-            var isInstallComputer = (rowText.indexOf('전산') !== -1 || rowText.indexOf('install') !== -1);
-            var isPickup = (rowText.indexOf('방문수령') !== -1 || rowText.indexOf('pickup') !== -1);
-            var isDirect = (rowText.indexOf('직배송') !== -1 || rowText.indexOf('direct') !== -1);
-
-            // [규칙 1] 택배 회수는 기존 전산 단독 관리이므로 무조건 제외 (Skipped)
-            var isRecovery = (rawCat.indexOf('회수') !== -1 && rawCat.indexOf('출고/회수') === -1);
-            if (isRecovery && isDeliveryExpress) {
-              skippedCount++;
-              return;
-            }
-
-            // [규칙 2] 전산(install) 단독 건 제외
-            if (isInstallComputer && !isDirect && !isPickup && !isQuick) {
-              skippedCount++;
-              return;
-            }
-
+            // [배송방법 판별 로직]
+            // 0. CSV/엑셀의 명시적 '배송방법' 컬럼값 최우선 확인
+            var rawMethod = getRowValue(r, methodIndices).trim().toLowerCase();
+            var hasExplicitMethod = false;
             var isMethodValid = false;
             var finalMethod = '직배송';
 
-            // [규칙 3] 배송 방식 판정 (퀵배송, 택배출고, 방문수령, 직배송 순서)
-            var isOutbound = (rawCat.indexOf('출고') !== -1 || rowText.indexOf('출고') !== -1);
-            var isReqOutboundOk = (reqStatus.indexOf('출고완료') !== -1 || reqStatus.indexOf('출고대기') !== -1 || rowText.indexOf('출고완료') !== -1 || rowText.indexOf('출고대기') !== -1);
-            var isDeliveryWait = (!deliveryStatus || deliveryStatus.indexOf('배송대기') !== -1);
+            if (rawMethod) {
+              if (rawMethod.indexOf('직배') !== -1 || rawMethod === 'direct') {
+                hasExplicitMethod = true;
+                isMethodValid = true;
+                finalMethod = '직배송';
+              } else if (rawMethod.indexOf('택배') !== -1 || rawMethod === 'delivery' || rawMethod === 'parcel') {
+                hasExplicitMethod = true;
+                isMethodValid = true;
+                finalMethod = '택배';
+              } else if (rawMethod.indexOf('퀵') !== -1 || rawMethod === 'quick') {
+                hasExplicitMethod = true;
+                isMethodValid = true;
+                finalMethod = '퀵배송';
+              } else if (rawMethod.indexOf('방문') !== -1 || rawMethod.indexOf('수령') !== -1 || rawMethod === 'pickup') {
+                hasExplicitMethod = true;
+                isMethodValid = true;
+                finalMethod = '방문수령';
+              }
+            }
 
-            if (isQuick) {
-              isMethodValid = true;
-              finalMethod = '퀵배송';
-            } else if (isDeliveryExpress && isOutbound && isReqOutboundOk && isDeliveryWait) {
-              isMethodValid = true;
-              finalMethod = '택배';
-            } else if (isPickup) {
-              isMethodValid = true;
-              finalMethod = '방문수령';
-            } else if (isDirect && !isDeliveryExpress && !isInstallComputer) {
-              isMethodValid = true;
-              finalMethod = '직배송';
-            } else if (isDirect) {
-              isMethodValid = true;
-              finalMethod = '직배송';
+            // [규칙 1] 택배 회수는 기존 전산 단독 관리이므로 무조건 제외 (Skipped)
+            var isRecovery = (rawCat.indexOf('회수') !== -1 && rawCat.indexOf('출고/회수') === -1);
+            if (isRecovery && finalMethod === '택배' && hasExplicitMethod) {
+              skippedCount++;
+              return;
+            }
+
+            // 명시적 배송방법 컬럼이 없거나 미지정된 경우: 비주소 텍스트 기반 폴백 판별
+            if (!hasExplicitMethod) {
+              // 주소 및 상세주소 컬럼은 배송방식 판단에서 원천 제외 (택배보관함, 무인택배함 등의 오인식 방지)
+              var nonAddrCells = r.filter(function(c, idx) {
+                return addrIndices.indexOf(idx) === -1 && detailAddrIndices.indexOf(idx) === -1;
+              });
+              var nonAddrText = nonAddrCells.map(function(c) { return String(c || '').trim(); }).join(' ');
+              // 주소성 시설 어휘(택배보관함, 무인택배함, 택배함, 택배실 등) 정제
+              var cleanText = nonAddrText.replace(/무인택배[함보관소]*|택배[보관함실소\s]+/g, '');
+
+              var isQuick = (cleanText.indexOf('퀵') !== -1 || cleanText.indexOf('quick') !== -1);
+              var isDirect = (cleanText.indexOf('직배송') !== -1 || cleanText.indexOf('direct') !== -1);
+              var isPickup = (cleanText.indexOf('방문수령') !== -1 || cleanText.indexOf('pickup') !== -1);
+              var isDeliveryExpress = (cleanText.indexOf('택배') !== -1 || cleanText.indexOf('delivery') !== -1);
+              var isInstallComputer = (cleanText.indexOf('전산') !== -1 || cleanText.indexOf('install') !== -1);
+
+              // [규칙 1-폴백] 택배 회수는 기존 전산 단독 관리이므로 무조건 제외 (Skipped)
+              if (isRecovery && isDeliveryExpress) {
+                skippedCount++;
+                return;
+              }
+
+              // [규칙 2] 전산(install) 단독 건 제외
+              if (isInstallComputer && !isDirect && !isPickup && !isQuick) {
+                skippedCount++;
+                return;
+              }
+
+              var isOutbound = (rawCat.indexOf('출고') !== -1 || cleanText.indexOf('출고') !== -1);
+              var isReqOutboundOk = (reqStatus.indexOf('출고완료') !== -1 || reqStatus.indexOf('출고대기') !== -1 || cleanText.indexOf('출고완료') !== -1 || cleanText.indexOf('출고대기') !== -1);
+              var isDeliveryWait = (!deliveryStatus || deliveryStatus.indexOf('배송대기') !== -1);
+
+              if (isQuick) {
+                isMethodValid = true;
+                finalMethod = '퀵배송';
+              } else if (isDirect) {
+                // 직배송이 명시된 경우 택배보다 우선
+                isMethodValid = true;
+                finalMethod = '직배송';
+              } else if (isPickup) {
+                isMethodValid = true;
+                finalMethod = '방문수령';
+              } else if (isDeliveryExpress && isOutbound && isReqOutboundOk && isDeliveryWait) {
+                isMethodValid = true;
+                finalMethod = '택배';
+              }
+            } else {
+              // 명시적 배송방법이 있는 경우 전산 단독 건 검사
+              if (rowText.indexOf('전산') !== -1 && finalMethod !== '직배송' && finalMethod !== '방문수령' && finalMethod !== '퀵배송' && finalMethod !== '택배') {
+                skippedCount++;
+                return;
+              }
             }
 
             var cust = getRowValue(r, custIndices);
