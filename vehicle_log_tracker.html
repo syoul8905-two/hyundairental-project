@@ -2008,48 +2008,99 @@
                   var mergedStops = [];
                   var delivOrder = 0;
 
-                  // 1) dateSchedules의 각 건을 순서대로 매핑/삽입
-                  dateSchedules.forEach(function(ds) {
-                    var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
-                    var matched = log.stops.find(function(st) {
+                  var existingIntermediates = log.stops.filter(function(st) {
+                    return st.type !== 'origin' && st.type !== 'return';
+                  });
+
+                  var matchedDsIds = {};
+
+                  if (existingIntermediates.length > 0) {
+                    // [사용자 순서 100% 절대 보존] 사용자가 일지에서 직접 조정한 경유지 순서를 그대로 유지하면서 관제 실시간 정보만 업데이트
+                    existingIntermediates.forEach(function(st) {
                       var stIdStr = String(st.id || '');
-                      var dsIdStr = String(ds.id || '');
-                      return stIdStr === 'stop_deliv_' + dsIdStr || stIdStr === dsIdStr;
+                      var stNorm = stIdStr.replace('stop_deliv_', '');
+                      var matchedDs = dateSchedules.find(function(ds) {
+                        var dsIdStr = String(ds.id || '');
+                        return dsIdStr === stNorm || dsIdStr === stIdStr || (ds.customer_name && st.name && ds.customer_name === st.name);
+                      });
+
+                      if (matchedDs) {
+                        matchedDsIds[matchedDs.id] = true;
+                        var isMid = (matchedDs.category === 'mid_return' || (matchedDs.customer_name && matchedDs.customer_name.indexOf('(중간 복귀)') !== -1));
+                        var dep = '', arr = '';
+                        if (matchedDs.memo_special) {
+                          try {
+                            var parsedSp = JSON.parse(matchedDs.memo_special);
+                            if (parsedSp.depart) dep = parsedSp.depart;
+                            if (parsedSp.arrive) arr = parsedSp.arrive;
+                          } catch(e) {
+                            var dM = matchedDs.memo_special.match(/출발[:\s]*(\d{1,2}:\d{2})/);
+                            if (dM) dep = dM[1];
+                            var aM = matchedDs.memo_special.match(/도착[:\s]*(\d{1,2}:\d{2})/);
+                            if (aM) arr = aM[1];
+                          }
+                        }
+
+                        if (!st.addr || st.addr === '' || st.addr === '-') st.addr = matchedDs.address || '';
+                        if (!st.memo || st.memo === '' || st.memo === '-') st.memo = isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (matchedDs.items || matchedDs.memo_full || '');
+                        st.status = matchedDs.status || st.status || '';
+                        st.time = matchedDs.visit_time || st.time || '';
+                        if (dep) st.depart = dep;
+                        if (arr) st.arrive = arr;
+                        if (isMid) {
+                          st.type = 'mid_return';
+                          st.order = null;
+                        } else if (st.type === 'delivery') {
+                          st.order = ++delivOrder;
+                        }
+                      } else if (st.type === 'delivery') {
+                        st.order = ++delivOrder;
+                      }
+                      mergedStops.push(st);
                     });
 
-                    var dep = '', arr = '';
-                    if (ds.memo_special) {
-                      try {
-                        var parsedSp = JSON.parse(ds.memo_special);
-                        if (parsedSp.depart) dep = parsedSp.depart;
-                        if (parsedSp.arrive) arr = parsedSp.arrive;
-                      } catch(e) {
-                        var dM = ds.memo_special.match(/출발[:\s]*(\d{1,2}:\d{2})/);
-                        if (dM) dep = dM[1];
-                        var aM = ds.memo_special.match(/도착[:\s]*(\d{1,2}:\d{2})/);
-                        if (aM) arr = aM[1];
+                    // 사후에 관제에 신규 추가된 배송 건이 있다면 목록 뒤에 자동 병합
+                    dateSchedules.forEach(function(ds) {
+                      if (!matchedDsIds[ds.id]) {
+                        stopsChanged = true;
+                        var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
+                        var dep = '', arr = '';
+                        if (ds.memo_special) {
+                          try {
+                            var parsedSp = JSON.parse(ds.memo_special);
+                            if (parsedSp.depart) dep = parsedSp.depart;
+                            if (parsedSp.arrive) arr = parsedSp.arrive;
+                          } catch(e) {}
+                        }
+                        mergedStops.push({
+                          id: 'stop_deliv_' + ds.id,
+                          type: isMid ? 'mid_return' : 'delivery',
+                          order: isMid ? null : (++delivOrder),
+                          name: ds.customer_name || (isMid ? '🏢 가산 센터 (중간 복귀)' : '배송지'),
+                          addr: ds.address || '',
+                          time: ds.visit_time || '',
+                          depart: dep,
+                          arrive: arr,
+                          status: ds.status || '',
+                          memo: isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || ''),
+                          contact: ds.contact || '',
+                          parking_fee: 0,
+                          fuel_fee: 0
+                        });
                       }
-                    }
-
-                    if (matched) {
-                      if (!matched.addr || matched.addr === '' || matched.addr === '-') matched.addr = ds.address || '';
-                      if (!matched.memo || matched.memo === '' || matched.memo === '-') matched.memo = isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || '');
-                      matched.status = ds.status || matched.status || '';
-                      matched.time = ds.visit_time || matched.time || '';
-                      if (dep) matched.depart = dep;
-                      if (arr) matched.arrive = arr;
-                      if (isMid) {
-                        matched.type = 'mid_return';
-                        matched.order = null;
-                        if (!matched.name || matched.name.indexOf('(중간 복귀)') === -1) matched.name = ds.customer_name || '🏢 가산 센터 (중간 복귀)';
-                      } else {
-                        matched.type = 'delivery';
-                        matched.order = ++delivOrder;
+                    });
+                  } else {
+                    // 최초 일지 생성 시: 관제 스케줄 순서대로 초기 생성
+                    dateSchedules.forEach(function(ds) {
+                      var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
+                      var dep = '', arr = '';
+                      if (ds.memo_special) {
+                        try {
+                          var parsedSp = JSON.parse(ds.memo_special);
+                          if (parsedSp.depart) dep = parsedSp.depart;
+                          if (parsedSp.arrive) arr = parsedSp.arrive;
+                        } catch(e) {}
                       }
-                      mergedStops.push(matched);
-                    } else {
-                      // 사후에 추가된 중간 복귀 또는 신규 배송 건 자동 병합!
-                      stopsChanged = true;
                       mergedStops.push({
                         id: 'stop_deliv_' + ds.id,
                         type: isMid ? 'mid_return' : 'delivery',
@@ -2065,23 +2116,8 @@
                         parking_fee: 0,
                         fuel_fee: 0
                       });
-                    }
-                  });
-
-                  // 2) 관제 스케줄 외 사용자가 일지에 수동 추가했던 경유지가 있다면 유지 (ID 정규화로 중복 완벽 방지)
-                  log.stops.forEach(function(st) {
-                    if (st.type !== 'origin' && st.type !== 'return') {
-                      var stNorm = String(st.id || '').replace('stop_deliv_', '');
-                      var alreadyIn = mergedStops.some(function(ms) {
-                        var msNorm = String(ms.id || '').replace('stop_deliv_', '');
-                        return msNorm === stNorm || (st.name && ms.name === st.name && st.order === ms.order);
-                      });
-                      if (!alreadyIn) {
-                        mergedStops.push(st);
-                        stopsChanged = true;
-                      }
-                    }
-                  });
+                    });
+                  }
 
                   // 3) 최종 복귀지 상태 및 시간 동기화 (가짜 복귀시간 임의 주입 방지)
                   if (returnStop) {
@@ -2115,26 +2151,16 @@
                     log.stops = [originStop].concat(mergedStops).concat([returnStop]);
                   }
 
-                  // 5) stops 개수 변경 시 구간 거리 및 계기판 연속성 자동 재계산
+                  // 5) stops 개수 변경 또는 비정상 단순 균등 분할 감지 시 지리적 비례 거리 자동 재계산
                   var dayTotalDist = log.distance_km || (log.end_km - log.start_km) || 0;
                   var totalLegCount = log.stops.length - 1;
-                  var needsDistRebalance = stopsChanged || log.stops.slice(1).some(function(s) { return s.distance_km === undefined || s.distance_km === null || isNaN(s.distance_km); });
+                  var isNaiveEqualSplit = totalLegCount >= 3 && log.stops.slice(1).every(function(s) {
+                    return Math.abs(Number(s.distance_km || 0) - Math.floor(dayTotalDist / totalLegCount)) <= 1;
+                  });
+                  var needsDistRebalance = stopsChanged || isNaiveEqualSplit || log.stops.slice(1).some(function(s) { return s.distance_km === undefined || s.distance_km === null || isNaN(s.distance_km); });
 
                   if (needsDistRebalance && dayTotalDist > 0 && totalLegCount > 0) {
-                    var baseDist = Math.floor(dayTotalDist / totalLegCount);
-                    var remDist = dayTotalDist % totalLegCount;
-                    var runningOdo = log.start_km;
-
-                    for (var k = 1; k < log.stops.length; k++) {
-                      var legDist = baseDist + ( (k - 1) < remDist ? 1 : 0 );
-                      var legStart = runningOdo;
-                      var legEnd = runningOdo + legDist;
-                      runningOdo = legEnd;
-
-                      log.stops[k].distance_km = legDist;
-                      log.stops[k].start_km = legStart;
-                      log.stops[k].end_km = legEnd;
-                    }
+                    distributeDayDistanceProportionally(log.stops, log.start_km, log.end_km);
                   }
                 }
               });
@@ -2367,22 +2393,12 @@
         allHaveDist = false;
       }
 
-      var runningOdo = log.start_km;
+      var isNaiveEqualSplit = totalLegCount >= 3 && stops.slice(startIdx).every(function(s) {
+        return Math.abs(Number(s.distance_km || 0) - Math.floor(dayTotalDist / totalLegCount)) <= 1;
+      });
 
-      if (!allHaveDist && dayTotalDist > 0) {
-        var baseDist = Math.floor(dayTotalDist / totalLegCount);
-        var remDist = dayTotalDist % totalLegCount;
-
-        for (var i = startIdx; i < stops.length; i++) {
-          var legDist = baseDist + ( (i - startIdx) < remDist ? 1 : 0 );
-          var legStart = runningOdo;
-          var legEnd = runningOdo + legDist;
-          runningOdo = legEnd;
-
-          stops[i].distance_km = legDist;
-          stops[i].start_km = legStart;
-          stops[i].end_km = legEnd;
-        }
+      if ((!allHaveDist || isNaiveEqualSplit) && dayTotalDist > 0) {
+        distributeDayDistanceProportionally(stops, log.start_km, log.end_km);
       }
 
       var legs = [];
@@ -2973,21 +2989,9 @@
             returnStop.distance_km = Math.max(0, endKm - stopStartKm);
           }
 
-          // Distribute distance across legs if needed
-          var hasOrig = (log.stops[0] && log.stops[0].type === 'origin');
-          var legStartIdx = hasOrig ? 1 : 0;
-          var legCnt = log.stops.length - legStartIdx;
-          if (legCnt > 0 && distanceKm > 0) {
-            var baseLegDist = Math.floor(distanceKm / legCnt);
-            var remLegDist = distanceKm % legCnt;
-            var runOdo = log.start_km;
-            for (var si = legStartIdx; si < log.stops.length; si++) {
-              var d = baseLegDist + ((si - legStartIdx) < remLegDist ? 1 : 0);
-              log.stops[si].distance_km = d;
-              log.stops[si].start_km = runOdo;
-              log.stops[si].end_km = runOdo + d;
-              runOdo += d;
-            }
+          // Distribute distance across legs using smart proportional distribution
+          if (distanceKm > 0) {
+            distributeDayDistanceProportionally(log.stops, log.start_km, endKm);
           }
         }
 
@@ -3225,22 +3229,30 @@
     // 6. Navigation Distance & Stops Management
     // ==========================================
     const REGION_COORDS = {
-      '금천': { lat: 37.4568, lng: 126.8954 },
-      '가산': { lat: 37.479493, lng: 126.884635 },
+      // 거점 및 센터
       '가산 센터': { lat: 37.479493, lng: 126.884635 },
+      '가산센터': { lat: 37.479493, lng: 126.884635 },
       'SJ테크노빌': { lat: 37.479493, lng: 126.884635 },
       '벚꽃로 278': { lat: 37.479493, lng: 126.884635 },
-      '구로': { lat: 37.4954, lng: 126.8874 },
-      '영등포': { lat: 37.5264, lng: 126.8962 },
+      '가산': { lat: 37.479493, lng: 126.884635 },
+      '금천': { lat: 37.4568, lng: 126.8954 },
+
+      // 서울 도심 세부 동/도로명
+      '충정로': { lat: 37.5598, lng: 126.9634 },
+      '신촌로': { lat: 37.5565, lng: 126.9485 },
+      '신촌': { lat: 37.5552, lng: 126.9368 },
+      '서대문': { lat: 37.5791, lng: 126.9368 },
       '여의도': { lat: 37.5216, lng: 126.9242 },
+      '영등포': { lat: 37.5264, lng: 126.8962 },
+      '구로': { lat: 37.4954, lng: 126.8874 },
       '마포': { lat: 37.5663, lng: 126.9016 },
+      '용산': { lat: 37.5326, lng: 126.9900 },
+      '종로': { lat: 37.5730, lng: 126.9794 },
+      '중구': { lat: 37.5636, lng: 126.9975 },
       '강남': { lat: 37.4979, lng: 127.0276 },
       '서초': { lat: 37.4837, lng: 127.0324 },
       '송파': { lat: 37.5145, lng: 127.1059 },
       '강동': { lat: 37.5301, lng: 127.1238 },
-      '종로': { lat: 37.5730, lng: 126.9794 },
-      '중구': { lat: 37.5636, lng: 126.9975 },
-      '용산': { lat: 37.5326, lng: 126.9900 },
       '동작': { lat: 37.5124, lng: 126.9393 },
       '관악': { lat: 37.4784, lng: 126.9516 },
       '양천': { lat: 37.5170, lng: 126.8665 },
@@ -3254,10 +3266,40 @@
       '도봉': { lat: 37.6688, lng: 127.0471 },
       '노원': { lat: 37.6542, lng: 127.0568 },
       '은평': { lat: 37.6027, lng: 126.9291 },
-      '서대문': { lat: 37.5791, lng: 126.9368 },
+
+      // 경기 광주 / 곤지암 / 동부
+      '곤지암': { lat: 37.3382, lng: 127.3396 },
+      '초월': { lat: 37.4243, lng: 127.3012 },
+      '경기 광주': { lat: 37.4294, lng: 127.2551 },
+      '광주시': { lat: 37.4294, lng: 127.2551 },
+      '광주': { lat: 37.4294, lng: 127.2551 },
+      '이천': { lat: 37.2723, lng: 127.4350 },
+      '여주': { lat: 37.2983, lng: 127.6372 },
+      '하남': { lat: 37.5393, lng: 127.2148 },
+      '남양주': { lat: 37.6360, lng: 127.2165 },
+      '구리': { lat: 37.5943, lng: 127.1296 },
+
+      // 경기 북부 (포천 / 의정부 / 양주 / 파주)
+      '군내면': { lat: 37.8872, lng: 127.2185 },
+      '용정경제': { lat: 37.8872, lng: 127.2185 },
+      '포천': { lat: 37.8949, lng: 127.2003 },
+      '녹양동': { lat: 37.7589, lng: 127.0355 },
+      '녹양로': { lat: 37.7589, lng: 127.0355 },
+      '녹양': { lat: 37.7589, lng: 127.0355 },
+      '의정부': { lat: 37.7381, lng: 127.0337 },
+      '양주': { lat: 37.7853, lng: 127.0458 },
+      '동두천': { lat: 37.9036, lng: 127.0607 },
+      '파주': { lat: 37.7600, lng: 126.7800 },
+      '고양': { lat: 37.6584, lng: 126.8320 },
+      '일산': { lat: 37.6760, lng: 126.7680 },
+      '덕양': { lat: 37.6373, lng: 126.8328 },
+      '김포': { lat: 37.6152, lng: 126.7157 },
+
+      // 경기 남부 및 인천
       '수원': { lat: 37.2636, lng: 127.0286 },
       '성남': { lat: 37.4200, lng: 127.1265 },
       '분당': { lat: 37.3827, lng: 127.1189 },
+      '판교': { lat: 37.3947, lng: 127.1111 },
       '용인': { lat: 37.2411, lng: 127.1776 },
       '수지': { lat: 37.3223, lng: 127.0975 },
       '기흥': { lat: 37.2804, lng: 127.1147 },
@@ -3275,11 +3317,9 @@
       '안산': { lat: 37.3219, lng: 126.8309 },
       '단원': { lat: 37.3252, lng: 126.8173 },
       '상록': { lat: 37.3082, lng: 126.8523 },
-      '고양': { lat: 37.6584, lng: 126.8320 },
-      '일산': { lat: 37.6760, lng: 126.7680 },
-      '덕양': { lat: 37.6373, lng: 126.8328 },
-      '파주': { lat: 37.7600, lng: 126.7800 },
-      '김포': { lat: 37.6152, lng: 126.7157 },
+      '평택': { lat: 36.9921, lng: 127.1129 },
+      '안성': { lat: 37.0080, lng: 127.2797 },
+      '오산': { lat: 37.1498, lng: 127.0772 },
       '인천': { lat: 37.4563, lng: 126.7052 },
       '부평': { lat: 37.5074, lng: 126.7219 },
       '남동': { lat: 37.4470, lng: 126.7314 },
@@ -3287,15 +3327,14 @@
       '송도': { lat: 37.3895, lng: 126.6534 },
       '서구': { lat: 37.5454, lng: 126.6760 },
       '계양': { lat: 37.5374, lng: 126.7378 },
-      '청라': { lat: 37.5361, lng: 126.6508 },
-      '남양주': { lat: 37.6360, lng: 127.2165 },
-      '구리': { lat: 37.5943, lng: 127.1296 },
-      '하남': { lat: 37.5393, lng: 127.2148 },
-      '평택': { lat: 36.9921, lng: 127.1129 }
+      '청라': { lat: 37.5361, lng: 126.6508 }
     };
 
     function getCoordsFromAddress(addr) {
       if (!addr) return { lat: 37.479493, lng: 126.884635 };
+      if (window.GEO_CACHE && window.GEO_CACHE[addr]) {
+        return window.GEO_CACHE[addr];
+      }
       for (var k in REGION_COORDS) {
         if (addr.indexOf(k) !== -1) {
           return REGION_COORDS[k];
@@ -3326,6 +3365,89 @@
       var roadKm = totalStraight * 1.38; // winding road factor
       var delivCount = stops.filter(function(s) { return s.type === 'delivery'; }).length;
       return Math.max(roadKm, delivCount > 0 ? (delivCount * 7.5 + 15) : 0);
+    }
+
+    // ==========================================
+    // Smart Mileage Proportional Distribute Engine
+    // (실제 경로 거리 가중치 기반 지리적 비례 분배 엔진)
+    // ==========================================
+    function distributeDayDistanceProportionally(stops, startKm, endKm) {
+      if (!stops || !Array.isArray(stops) || stops.length <= 1) return;
+      var hasOrig = (stops[0] && stops[0].type === 'origin');
+      var legStartIdx = hasOrig ? 1 : 0;
+      var totalLegCount = stops.length - legStartIdx;
+      if (totalLegCount <= 0) return;
+
+      var totalDist = Math.max(0, Number(endKm || 0) - Number(startKm || 0));
+
+      if (hasOrig) {
+        stops[0].start_km = Number(startKm);
+        stops[0].end_km = Number(startKm);
+        stops[0].distance_km = 0;
+      }
+
+      if (totalDist === 0) {
+        for (var i = legStartIdx; i < stops.length; i++) {
+          stops[i].distance_km = 0;
+          stops[i].start_km = Number(startKm);
+          stops[i].end_km = Number(startKm);
+        }
+        return;
+      }
+
+      // 1. 각 구간별 실제 좌표 기반 예상 도로 거리 측정
+      var estDists = [];
+      var totalEstDist = 0;
+      for (var i = legStartIdx; i < stops.length; i++) {
+        var prevStop = stops[i - 1];
+        var currStop = stops[i];
+        var p1 = getCoordsFromAddress(prevStop.addr || prevStop.name || '');
+        var p2 = getCoordsFromAddress(currStop.addr || currStop.name || '');
+        var straightKm = calcHaversineDistanceKm(p1.lat, p1.lng, p2.lat, p2.lng);
+        var roadEst = straightKm * 1.38;
+
+        var isSameAddr = (prevStop.addr && currStop.addr && prevStop.addr === currStop.addr);
+        if (roadEst < 1.5 && !isSameAddr) {
+          roadEst = 2.0; // 시내 동일 권역/인근 자치구 최소 2km 보장
+        } else if (isSameAddr) {
+          roadEst = 0.5;
+        }
+
+        estDists.push(roadEst);
+        totalEstDist += roadEst;
+      }
+
+      // 2. 총 주행거리(totalDist)를 예상 도로 거리 비율로 가중치 비례 배분
+      var allocatedDists = [];
+      var allocatedSum = 0;
+      for (var j = 0; j < estDists.length; j++) {
+        var ratio = totalEstDist > 0 ? (estDists[j] / totalEstDist) : (1 / totalLegCount);
+        var d = Math.max(1, Math.round(totalDist * ratio));
+        allocatedDists.push(d);
+        allocatedSum += d;
+      }
+
+      // 3. 반올림 오차 보정 (총합이 정확히 totalDist와 일치하도록 최장 구간에서 가감)
+      var diff = totalDist - allocatedSum;
+      if (diff !== 0) {
+        var maxIdx = 0;
+        for (var m = 1; m < allocatedDists.length; m++) {
+          if (allocatedDists[m] > allocatedDists[maxIdx]) maxIdx = m;
+        }
+        allocatedDists[maxIdx] += diff;
+        if (allocatedDists[maxIdx] < 1) allocatedDists[maxIdx] = 1;
+      }
+
+      // 4. 구간별 시작/종료 Km 및 연속성 확립
+      var runningOdo = Number(startKm);
+      for (var k = 0; k < allocatedDists.length; k++) {
+        var legIdx = legStartIdx + k;
+        var legDist = allocatedDists[k];
+        stops[legIdx].distance_km = legDist;
+        stops[legIdx].start_km = runningOdo;
+        stops[legIdx].end_km = runningOdo + legDist;
+        runningOdo += legDist;
+      }
     }
 
     // Modal Stops State
@@ -4349,26 +4471,7 @@
 
       var distanceKm = endKm - startKm;
       if (Array.isArray(modalStops) && modalStops.length > 0) {
-        var hasOrig = (modalStops[0] && modalStops[0].type === 'origin');
-        var legStartIdx = hasOrig ? 1 : 0;
-        var legCnt = modalStops.length - legStartIdx;
-        if (hasOrig) {
-          modalStops[0].start_km = startKm;
-          modalStops[0].end_km = startKm;
-          modalStops[0].distance_km = 0;
-        }
-        if (legCnt > 0) {
-          var baseLegDist = Math.floor(distanceKm / legCnt);
-          var remLegDist = distanceKm % legCnt;
-          var runOdo = startKm;
-          for (var si = legStartIdx; si < modalStops.length; si++) {
-            var d = distanceKm > 0 ? (baseLegDist + ((si - legStartIdx) < remLegDist ? 1 : 0)) : 0;
-            modalStops[si].distance_km = d;
-            modalStops[si].start_km = runOdo;
-            modalStops[si].end_km = runOdo + d;
-            runOdo += d;
-          }
-        }
+        distributeDayDistanceProportionally(modalStops, startKm, endKm);
       }
       var existingLog = tripLogs.find(function(l) { return l.id === Number(logId); });
       var isClosedVal = existingLog ? Boolean(existingLog.is_closed) : false;
@@ -4444,6 +4547,28 @@
               driver_name: driverName,
               memo_full: JSON.stringify(logPayload)
             }]);
+          }
+
+          // 배송 순서 변경 사항을 관제 delivery_schedules의 stop_order에도 동기화
+          if (Array.isArray(modalStops) && modalStops.length > 0) {
+            var delivOrderCounter = 1;
+            var orderUpdates = [];
+            modalStops.forEach(function(st) {
+              var stIdStr = String(st.id || '');
+              if (stIdStr.startsWith('stop_deliv_')) {
+                var realId = Number(stIdStr.replace('stop_deliv_', ''));
+                if (realId) {
+                  orderUpdates.push(
+                    supabaseClient.from('delivery_schedules')
+                      .update({ stop_order: delivOrderCounter++ })
+                      .eq('id', realId)
+                  );
+                }
+              }
+            });
+            if (orderUpdates.length > 0) {
+              await Promise.all(orderUpdates).catch(function(e) { console.warn('stop_order sync error:', e); });
+            }
           }
 
           // Recalibrate vehicleMaster current_km to match the true latest odometer
