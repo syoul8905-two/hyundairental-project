@@ -963,6 +963,17 @@
         </button>
       </div>
 
+      <!-- Past Delivery Note Reference Area (출고 당시 특이사항 참고) -->
+      <div id="memoModalPastInfoArea" class="hidden p-3 bg-amber-50 border-2 border-amber-300 rounded-2xl space-y-1.5 shadow-2xs">
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-black text-amber-950 flex items-center gap-1.5">
+            <i class="fa-solid fa-bell text-amber-600"></i> 출고 당시 특이사항 참고
+          </span>
+          <span id="memoModalPastAuthorBadge" class="text-[9.5px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold border border-amber-300"></span>
+        </div>
+        <div id="memoModalPastIssueText" class="text-xs font-bold text-amber-950 bg-white/90 p-2 rounded-xl border border-amber-200 break-all leading-relaxed"></div>
+      </div>
+
       <!-- Quick Preset Buttons (게으른 실무자 1초 완성 프리셋) -->
       <div class="space-y-1.5 bg-indigo-50/50 p-2.5 rounded-2xl border border-indigo-100">
         <div class="flex items-center justify-between">
@@ -1185,6 +1196,13 @@
     var lastMobileDataHash = '';
     var pendingMobileSyncMemos = {}; // { [rowId]: { issue: string, author: string, time: number } }
     var memoDebounceTimers = {};
+    var pastDeliveryNotesMap = new Map(); // contract_no -> past delivery info
+    var pastDeliveryNotesByCustomerMap = new Map(); // customer_name -> past delivery info
+
+    function isPlaceholderContractNo(val) {
+      var v = String(val || '').trim();
+      return !v || v === '신규등록' || v === '계약번호 없음' || v === '[계약번호 없음]' || v === '-';
+    }
 
     function calcMobileRecordsHash(rows) {
       if (!rows || rows.length === 0) return '';
@@ -1930,7 +1948,7 @@
             depart_iso = parsed.depart_iso || '';
             arrive = parsed.arrive || '';
             issue = parsed.issue || '';
-            issueAuthor = parsed.issue_author || '';
+            issueAuthor = parsed.issue_author || parsed.issueAuthor || parsed.author || '';
             photo = parsed.photo || '';
             updated_at = parsed.updated_at || '';
             if (Array.isArray(parsed.inspectPhotos) && parsed.inspectPhotos.length > 0) {
@@ -4008,8 +4026,129 @@
           : currentUser.id + '님';
         showToast('👋 ' + label + ', 오늘의 배송 (' + driverRecords.length + '건) 목록입니다.');
       }
+    }
 
-      // 배송기사/관리자 모두 차량 선택 강제 팝업 없이 배송 일정 자유롭게 확인 가능 (티맵 실행 시 차량 선택 안내)
+    // ==========================================
+    // Past Delivery Notes & Photos Engine (회수/교환 시 출고 메모/사진 연동)
+    // ==========================================
+    async function fetchPastDeliveryNotesForMobile(rows) {
+      if (!supabaseClient || !rows || rows.length === 0) return;
+      try {
+        var contractList = [];
+        var placeholderCustList = [];
+        rows.forEach(function(r) {
+          var cNo = (r.contract_no || '').trim();
+          var cName = (r.customer_name || '').trim();
+          if (!isPlaceholderContractNo(cNo)) {
+            if (!contractList.includes(cNo)) contractList.push(cNo);
+          } else if (cName) {
+            if (!placeholderCustList.includes(cName)) placeholderCustList.push(cName);
+          }
+        });
+
+        pastDeliveryNotesMap.clear();
+        pastDeliveryNotesByCustomerMap.clear();
+
+        var fetchPromises = [];
+
+        if (contractList.length > 0) {
+          fetchPromises.push(
+            supabaseClient
+              .from('delivery_schedules')
+              .select('id, contract_no, customer_name, category, delivery_date, driver_name, memo_special')
+              .neq('delivery_date', currentDate)
+              .in('contract_no', contractList)
+              .not('memo_special', 'is', null)
+              .order('delivery_date', { ascending: false })
+          );
+        }
+
+        if (placeholderCustList.length > 0) {
+          fetchPromises.push(
+            supabaseClient
+              .from('delivery_schedules')
+              .select('id, contract_no, customer_name, category, delivery_date, driver_name, memo_special')
+              .neq('delivery_date', currentDate)
+              .in('customer_name', placeholderCustList)
+              .not('memo_special', 'is', null)
+              .order('delivery_date', { ascending: false })
+          );
+        }
+
+        if (fetchPromises.length === 0) return;
+
+        var results = await Promise.all(fetchPromises);
+        results.forEach(function(res) {
+          if (!res || !res.data) return;
+          res.data.forEach(function(row) {
+            var pTimes = getStopTimes(row);
+            if (pTimes.issue || pTimes.photo || (pTimes.inspectPhotos && pTimes.inspectPhotos.length > 0)) {
+              var cNo = (row.contract_no || '').trim();
+              var cName = (row.customer_name || '').trim();
+              var infoObj = {
+                id: row.id,
+                delivery_date: row.delivery_date || '',
+                customer_name: row.customer_name || '',
+                driver_name: pTimes.issueAuthor || row.driver_name || '',
+                category: row.category || '출고',
+                issue: pTimes.issue || '',
+                issueAuthor: pTimes.issueAuthor || row.driver_name || '',
+                photo: pTimes.photo || '',
+                inspectPhotos: pTimes.inspectPhotos || []
+              };
+
+              if (cNo && !isPlaceholderContractNo(cNo) && !pastDeliveryNotesMap.has(cNo)) {
+                pastDeliveryNotesMap.set(cNo, infoObj);
+              }
+              if (cName && !pastDeliveryNotesByCustomerMap.has(cName)) {
+                pastDeliveryNotesByCustomerMap.set(cName, infoObj);
+              }
+            }
+          });
+        });
+      } catch (err) {
+        console.warn('Failed to fetch past delivery notes:', err);
+      }
+    }
+
+    function getPastDeliveryInfoForRecord(r) {
+      if (!r) return null;
+      var cNo = (r.contract_no || '').trim();
+      var info = null;
+      if (!isPlaceholderContractNo(cNo) && pastDeliveryNotesMap.has(cNo)) {
+        info = pastDeliveryNotesMap.get(cNo);
+      } else {
+        var cName = (r.customer_name || '').trim();
+        if (cName && pastDeliveryNotesByCustomerMap.has(cName)) {
+          info = pastDeliveryNotesByCustomerMap.get(cName);
+        }
+      }
+      if (info && r.id && info.id === r.id) return null;
+      return info;
+    }
+
+    function openPastDeliveryCardPhoto(idx) {
+      if (!driverRecords || !driverRecords[idx]) return;
+      var r = driverRecords[idx];
+      var past = getPastDeliveryInfoForRecord(r);
+      if (past && past.photo) {
+        openMobilePhotoModal(past.photo, (r.customer_name || '현장') + ' [출고 당시 설치/현장 사진] (' + (past.delivery_date || '') + ')');
+      }
+    }
+
+    function openPastDeliveryInspectGallery(idx, photoIdx) {
+      if (!driverRecords || !driverRecords[idx]) return;
+      var r = driverRecords[idx];
+      var past = getPastDeliveryInfoForRecord(r);
+      if (past && past.inspectPhotos && past.inspectPhotos.length > 0) {
+        var gallery = past.inspectPhotos.map(function(p, i) {
+          return {
+            src: p.data || p.url || '',
+            title: (r.customer_name || '') + ' [출고 검수사진 #' + (i + 1) + '] (' + (p.uploader || past.driver_name || '출고') + ' · ' + (past.delivery_date || '') + ')'
+          };
+        });
+        openMobilePhotoModal(gallery[photoIdx || 0].src, gallery[photoIdx || 0].title, gallery, photoIdx || 0);
+      }
     }
 
     async function loadMobileData(showWelcome) {
@@ -4075,6 +4214,7 @@
         });
 
         allMobileRows = allRows;
+        await fetchPastDeliveryNotesForMobile(allRows);
 
         // 배송기사와 관리자 모두 상단 기사 선택 바를 상시 노출하여 타 기사 스케줄 열람 지원
         var adminBar = document.getElementById('adminDriverSelectorBar');
@@ -4303,6 +4443,7 @@
         var phoneNum = contactObj.phone;
         var contactName = contactObj.name;
         var contactDisplay = contactName ? (contactName + (phoneNum ? ' (' + phoneNum + ')' : '')) : (phoneNum || '');
+        var pastInfo = getPastDeliveryInfoForRecord(r);
 
         var card = document.createElement('div');
         card.className = 'bg-white rounded-2xl p-4 border ' + (hasSelectedStops ? (isStopSelected ? 'border-indigo-400 ring-2 ring-indigo-500/30 bg-indigo-50/20 shadow-md' : 'border-slate-200 opacity-60') : (isArrived ? 'border-emerald-200 bg-emerald-50/20' : isDriving ? 'border-indigo-300 ring-2 ring-indigo-500/20 shadow-md' : 'border-slate-200 shadow-xs')) + ' space-y-3 transition';
@@ -4360,6 +4501,53 @@
 
           <!-- Field Issue Memo & Photo Section (독립 바텀시트 모달 연동) -->
           <div class="space-y-2">
+            ${(pastInfo && (pastInfo.issue || pastInfo.photo || (pastInfo.inspectPhotos && pastInfo.inspectPhotos.length > 0))) ? `
+              <div class="p-3 bg-gradient-to-r from-amber-50 via-amber-50/80 to-orange-50 border-2 border-amber-400 rounded-2xl space-y-2 shadow-xs">
+                <div class="flex items-center justify-between">
+                  <span class="text-[11.5px] font-black text-amber-950 flex items-center gap-1.5">
+                    <i class="fa-solid fa-bell text-amber-600 animate-bounce"></i>
+                    <span>🚨 출고 당시 기사 특이사항</span>
+                  </span>
+                  <span class="text-[9.5px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold border border-amber-300 shadow-2xs">
+                    ${pastInfo.driver_name ? (pastInfo.driver_name + ' 기사 · ') : ''}${pastInfo.delivery_date || '이전 출고'}
+                  </span>
+                </div>
+                ${pastInfo.issue ? `
+                  <div class="p-2.5 bg-white/95 rounded-xl border border-amber-200 shadow-2xs">
+                    <p class="text-xs font-black text-amber-950 break-all whitespace-pre-line leading-relaxed">
+                      ${pastInfo.issue}
+                    </p>
+                  </div>
+                ` : ''}
+                ${pastInfo.photo ? `
+                  <div class="bg-white/95 p-2.5 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/60 active:scale-99 transition shadow-2xs space-y-1.5" onclick="event.stopPropagation(); openPastDeliveryCardPhoto(${idx})">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-black text-amber-950 flex items-center gap-1">
+                        <i class="fa-solid fa-camera text-amber-600"></i> 출고 당시 설치/현장 사진
+                      </span>
+                      <span class="text-[10px] text-indigo-700 font-bold flex items-center gap-0.5 underline">
+                        전체화면 확대 <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>
+                      </span>
+                    </div>
+                    <div class="relative w-full h-44 overflow-hidden rounded-xl border border-amber-300 bg-slate-900/5">
+                      <img src="${pastInfo.photo}" class="w-full h-full object-cover" alt="출고 당시 설치 사진">
+                      <div class="absolute bottom-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-xs font-bold flex items-center gap-1">
+                        <i class="fa-solid fa-magnifying-glass-plus"></i> 터치하여 확대
+                      </div>
+                    </div>
+                  </div>
+                ` : ''}
+                ${(Array.isArray(pastInfo.inspectPhotos) && pastInfo.inspectPhotos.length > 0) ? `
+                  <div class="flex items-center justify-between bg-amber-100/60 px-2.5 py-1.5 rounded-xl border border-amber-200">
+                    <span class="text-[10px] text-amber-900 font-bold">📦 출고 검수 사진 (${pastInfo.inspectPhotos.length}장 보관)</span>
+                    <button type="button" onclick="event.stopPropagation(); openPastDeliveryInspectGallery(${idx}, 0)" class="text-[10px] font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-amber-300 shadow-2xs hover:bg-amber-50">
+                      검수사진 확인 ↗
+                    </button>
+                  </div>
+                ` : ''}
+              </div>
+            ` : ''}
+
             ${(times.issue || times.photo) ? `
               <div onclick="openMobileMemoModal(${idx})" class="p-2.5 bg-amber-50/90 border border-amber-200 rounded-xl space-y-1.5 cursor-pointer hover:bg-amber-100/80 active:scale-99 transition shadow-2xs">
                 <div class="flex items-center justify-between">
@@ -4710,6 +4898,18 @@
       if (textarea) textarea.value = times.issue || '';
       if (authorBadge) {
         authorBadge.innerText = times.issueAuthor ? `최근 작성: ${times.issueAuthor}` : '';
+      }
+
+      var past = getPastDeliveryInfoForRecord(r);
+      var pastArea = document.getElementById('memoModalPastInfoArea');
+      var pastText = document.getElementById('memoModalPastIssueText');
+      var pastAuthor = document.getElementById('memoModalPastAuthorBadge');
+      if (pastArea && past && (past.issue || past.photo)) {
+        pastArea.classList.remove('hidden');
+        if (pastText) pastText.innerText = past.issue || (past.photo ? '[출고 사진 등록됨]' : '');
+        if (pastAuthor) pastAuthor.innerText = (past.driver_name ? past.driver_name + ' 기사 · ' : '') + (past.delivery_date || '');
+      } else if (pastArea) {
+        pastArea.classList.add('hidden');
       }
 
       updateModalPhotoUI();

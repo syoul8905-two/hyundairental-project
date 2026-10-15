@@ -2896,7 +2896,7 @@
       try {
         var res = await supabaseClient
           .from('delivery_schedules')
-          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status')
+          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status, memo_special')
           .not('contract_no', 'is', null)
           .neq('contract_no', '')
           .neq('contract_no', '신규등록')
@@ -2910,13 +2910,18 @@
           var cNo = (row.contract_no || '').trim();
           if (isPlaceholderContractNo(cNo)) return;
           if (!map.has(cNo)) map.set(cNo, []);
+          var memoTimes = getStopTimes(row);
           map.get(cNo).push({
             id: row.id,
             delivery_date: row.delivery_date || '',
             customer_name: row.customer_name || '',
-            driver_name: row.driver_name || '',
+            driver_name: memoTimes.issueAuthor || row.driver_name || '',
             category: row.category || '',
-            status: row.status || ''
+            status: row.status || '',
+            memo_special: row.memo_special || '',
+            issue: memoTimes.issue || '',
+            issueAuthor: memoTimes.issueAuthor || row.driver_name || '',
+            photo: memoTimes.photo || ''
           });
         });
         contractHistoryIndexMap = map;
@@ -2930,7 +2935,7 @@
 
     function getContractPastHistoryInfo(contractNo, currentId, currentDate) {
       if (isPlaceholderContractNo(contractNo)) {
-        return { count: 0, items: [] };
+        return { count: 0, items: [], latestIssueItem: null };
       }
       var key = contractNo.trim();
       var allItems = contractHistoryIndexMap.get(key) || [];
@@ -2939,9 +2944,13 @@
         if (currentId && item.id === currentId) return false;
         return true;
       });
+      var latestIssue = pastItems.find(function(it) {
+        return !!(it.issue || it.photo);
+      });
       return {
         count: pastItems.length,
-        items: pastItems
+        items: pastItems,
+        latestIssueItem: latestIssue || null
       };
     }
 
@@ -7746,6 +7755,15 @@
                 </button>
               </div>
             ` : ''}
+            ${(histInfo && histInfo.latestIssueItem && (histInfo.latestIssueItem.issue || histInfo.latestIssueItem.photo)) ? `
+              <div class="mt-1 px-1.5 py-0.5 bg-amber-50 border border-amber-300 rounded text-[10px] text-amber-900 font-bold flex items-center justify-between gap-1 cursor-pointer hover:bg-amber-100 transition shadow-2xs" onclick="openContractHistoryModal('${r.계약번호}')" title="과거 출고 당시 기사 특이사항: ${histInfo.latestIssueItem.issue || '사진등록'} (${histInfo.latestIssueItem.delivery_date} · ${histInfo.latestIssueItem.driver_name || ''})">
+                <div class="flex items-center gap-1 truncate">
+                  <i class="fa-solid fa-bell text-amber-600 text-[9px] shrink-0"></i>
+                  <span class="truncate max-w-[170px]">출고특이: ${histInfo.latestIssueItem.issue || '사진등록'}</span>
+                </div>
+                <span class="text-[9px] text-amber-700 bg-amber-100 px-1 py-0.2 rounded shrink-0">${histInfo.latestIssueItem.delivery_date.slice(5)}</span>
+              </div>
+            ` : ''}
             ${(times.inspectPhotos && times.inspectPhotos.length > 0) ? `
               <div onclick="openParcelInspectPhotoModal(${realIdx})" class="mt-1 inline-flex items-center gap-1.5 bg-amber-50 hover:bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300 cursor-pointer transition shadow-2xs" title="클릭하여 출고 검수 사진 갤러리 보기/추가">
                 <div class="flex items-center -space-x-1.5">
@@ -8516,6 +8534,31 @@
                    onchange="onInlineMemoChange(${realIdx}, this.value)"
                    class="w-full px-2.5 py-1.5 text-xs bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-lg text-slate-700 font-medium">
           </div>
+
+          ${(histInfo && histInfo.latestIssueItem && (histInfo.latestIssueItem.issue || histInfo.latestIssueItem.photo)) ? `
+            <div class="p-2.5 bg-amber-50/90 border border-amber-300 rounded-xl text-xs text-amber-950 font-medium space-y-1 shadow-2xs">
+              <div class="font-black flex items-center justify-between text-[11px] text-amber-900">
+                <span class="flex items-center gap-1">
+                  <i class="fa-solid fa-bell text-amber-600"></i>
+                  <span>출고 당시 기사 특이사항</span>
+                </span>
+                <span class="text-[9.5px] bg-amber-200 text-amber-950 px-1.5 py-0.2 rounded font-bold">
+                  ${histInfo.latestIssueItem.driver_name ? histInfo.latestIssueItem.driver_name + ' 기사 · ' : ''}${histInfo.latestIssueItem.delivery_date}
+                </span>
+              </div>
+              ${histInfo.latestIssueItem.issue ? `
+                <div class="font-bold whitespace-pre-wrap bg-white/90 p-1.5 rounded border border-amber-200 leading-snug">
+                  ${histInfo.latestIssueItem.issue}
+                </div>
+              ` : ''}
+              ${histInfo.latestIssueItem.photo ? `
+                <div class="flex items-center gap-2 pt-0.5 cursor-pointer" onclick="openPhotoViewerModal('${histInfo.latestIssueItem.photo.replace(/'/g, "\\'")}', '${r.고객사} [출고 당시 사진]')">
+                  <img src="${histInfo.latestIssueItem.photo}" class="w-10 h-10 rounded-lg object-cover border border-amber-400 shadow-2xs" alt="출고 사진">
+                  <span class="text-[10.5px] font-bold text-amber-900 underline">출고 사진 확인 ↗</span>
+                </div>
+              ` : ''}
+            </div>
+          ` : ''}
 
           ${times.issue ? `
             <div class="p-2 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-900 font-medium space-y-0.5" title="${times.issue}">
