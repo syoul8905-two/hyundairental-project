@@ -3507,6 +3507,8 @@
         _modalDriverTouched = true;
         renderModalQuickDriverButtons();
         showToast(`👤 운전자가 [${drvName}](으)로 설정됨`);
+        var tripDate = document.getElementById('modalTripDate') ? document.getElementById('modalTripDate').value : '';
+        if (tripDate) loadStopsForDate(tripDate, true);
         return;
       }
 
@@ -3529,6 +3531,9 @@
         renderModalQuickDriverButtons();
         showToast(`👤 운전자에 [${drvName}] 추가됨`);
       }
+
+      var tripDate = document.getElementById('modalTripDate') ? document.getElementById('modalTripDate').value : '';
+      if (tripDate) loadStopsForDate(tripDate, true);
     }
 
     function toggleQuickDriverEditBox(forceState) {
@@ -3904,99 +3909,149 @@
       });
     }
 
-    async function loadStopsForDate(dateStr) {
+    async function loadStopsForDate(dateStr, forceReload) {
       if (!supabaseClient || !dateStr) return;
       try {
-        var res = await supabaseClient.from('delivery_schedules')
-          .select('*')
-          .eq('delivery_date', dateStr)
-          .neq('source_sheet', 'VEHICLE_TRIP_LOGS')
-          .neq('source_sheet', 'SYSTEM_CONFIG_VEHICLES')
-          .neq('source_sheet', 'AS_RECORDS')
-          .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
-          .neq('contract_no', 'HANDOVER_CONFIG')
-          .order('id', { ascending: true });
+        var isUnop = document.getElementById('modalIsUnoperated') ? document.getElementById('modalIsUnoperated').checked : false;
+        if (isUnop) {
+          modalStops = [
+            { id: 'stop_origin', type: 'origin', name: '가산 센터', addr: '서울 금천구 벚꽃로 278 (가산 센터)', time: '08:30' },
+            { id: 'stop_return', type: 'return', name: '가산 센터 (최종 복귀)', addr: '서울 금천구 벚꽃로 278 (가산 센터)', time: '18:00' }
+          ];
+          renderModalStops();
+          var recEl = document.getElementById('modalSuggestedKm');
+          if (recEl) recEl.innerText = '0.0 km';
+          return;
+        }
 
-        if (res.data && res.data.length > 0) {
-          if (modalStops.length <= 2) {
-            var dest = document.getElementById('modalDestAddr').value || '서울 금천구 벚꽃로 278 (가산 센터)';
-            var destName = document.getElementById('modalDestType').value === 'gasan' ? '가산 센터' : dest;
+        if (modalStops.length > 2 && !forceReload) {
+          return;
+        }
 
-            // [핵심 가드] 모달에 선택된 차량 및 운행자 정보 추출
-            var curDriverStr = document.getElementById('modalDriverName') ? document.getElementById('modalDriverName').value.trim() : '';
-            var curVehNo = document.getElementById('modalVehicleNo') ? document.getElementById('modalVehicleNo').value.trim() : currentSelectedVehicleNo;
-            var curVeh = vehiclesMaster.find(function(v) { return v.vehicle_no === curVehNo; }) || {};
-            if (!curDriverStr || curDriverStr === '미운행') {
-              curDriverStr = curVeh.default_driver || '';
-            }
-            var allowedDrivers = curDriverStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+        // [핵심 가드] 모달에 선택된 차량 및 운행자 정보 추출
+        var curDriverStr = document.getElementById('modalDriverName') ? document.getElementById('modalDriverName').value.trim() : '';
+        var curVehNo = document.getElementById('modalVehicleNo') ? document.getElementById('modalVehicleNo').value.trim() : currentSelectedVehicleNo;
+        var curVeh = vehiclesMaster.find(function(v) { return v.vehicle_no === curVehNo; }) || {};
+        if (!curDriverStr || curDriverStr === '미운행') {
+          curDriverStr = curVeh.default_driver || '';
+        }
+        var allowedDrivers = curDriverStr.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
 
-            // 해당 차량 운행자의 직배송 건만 엄격 필터링 (퀵, 방문수령, 택배 및 타 차량 배송지 100% 배제)
-            var eligibleRows = res.data.filter(function(r) {
-              var isQuick = (r.delivery_method === '퀵배송' || r.delivery_method === '퀵' || r.driver_name === '퀵' || (r.category && r.category.indexOf('퀵') !== -1));
-              var isPickup = (r.delivery_method === '방문수령' || r.driver_name === '방문수령' || (r.category === '수령' && r.delivery_method !== '직배송'));
-              var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
-              if (isQuick || isPickup || isParcel) return false;
+        // 1. 당일 배송 스케줄 및 타 차량 운행일지 병렬 조회
+        var [schedRes, tripLogsRes] = await Promise.all([
+          supabaseClient.from('delivery_schedules')
+            .select('*')
+            .eq('delivery_date', dateStr)
+            .neq('source_sheet', 'VEHICLE_TRIP_LOGS')
+            .neq('source_sheet', 'SYSTEM_CONFIG_VEHICLES')
+            .neq('source_sheet', 'AS_RECORDS')
+            .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
+            .neq('contract_no', 'HANDOVER_CONFIG')
+            .order('id', { ascending: true }),
+          supabaseClient.from('delivery_schedules')
+            .select('customer_name, memo_full')
+            .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
+            .eq('delivery_date', dateStr)
+            .neq('customer_name', curVehNo)
+        ]);
 
-              if (allowedDrivers.length > 0) {
-                var rDrv = (r.driver_name || '').trim();
-                if (allowedDrivers.indexOf(rDrv) === -1) return false;
+        // 타 차량에 이미 등록된 배송지 ID 수집 (100% 원천 배제 - 고유 ID 기반 엄격 매칭)
+        var alreadyAssignedStopIds = new Set();
+        if (tripLogsRes && tripLogsRes.data) {
+          tripLogsRes.data.forEach(function(tl) {
+            try {
+              var payload = JSON.parse(tl.memo_full || '{}');
+              if (Array.isArray(payload.stops)) {
+                payload.stops.forEach(function(st) {
+                  if (st.id) {
+                    var sIdStr = String(st.id);
+                    alreadyAssignedStopIds.add(sIdStr);
+                    var rawNum = sIdStr.replace('stop_deliv_', '');
+                    if (rawNum) alreadyAssignedStopIds.add(rawNum);
+                  }
+                });
               }
-              return true;
-            });
+            } catch(e) {}
+          });
+        }
 
-            // stop_order 순서로 정렬하여 중간 복귀 위치 보존
-            eligibleRows.sort(function(a, b) {
-              var aOrder = (a.stop_order !== null && a.stop_order !== undefined) ? Number(a.stop_order) : 9999;
-              var bOrder = (b.stop_order !== null && b.stop_order !== undefined) ? Number(b.stop_order) : 9999;
-              if (aOrder !== bOrder) return aOrder - bOrder;
-              return (a.id || 0) - (b.id || 0);
-            });
+        var dest = (document.getElementById('modalDestAddr') && document.getElementById('modalDestAddr').value) || '서울 금천구 벚꽃로 278 (가산 센터)';
+        var destTypeEl = document.getElementById('modalDestType');
+        var destName = (destTypeEl && destTypeEl.value === 'gasan') ? '가산 센터' : dest;
 
-            modalStops = [
-              { id: 'stop_origin', type: 'origin', name: '가산 센터', addr: '서울 금천구 벚꽃로 278 (가산 센터)', time: '08:30' }
-            ];
+        var eligibleRows = [];
+        if (schedRes && schedRes.data && schedRes.data.length > 0) {
+          eligibleRows = schedRes.data.filter(function(r) {
+            var isQuick = (r.delivery_method === '퀵배송' || r.delivery_method === '퀵' || r.driver_name === '퀵' || (r.category && r.category.indexOf('퀵') !== -1));
+            var isPickup = (r.delivery_method === '방문수령' || r.driver_name === '방문수령' || (r.category === '수령' && r.delivery_method !== '직배송'));
+            var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
+            if (isQuick || isPickup || isParcel) return false;
 
-            var delivCount = 0;
-            eligibleRows.forEach(function(r, idx) {
-              var dep = '', arr = '';
-              if (r.memo_special) {
-                try {
-                  var sp = JSON.parse(r.memo_special);
-                  dep = sp.depart || '';
-                  arr = sp.arrive || '';
-                } catch(e) {}
-              }
-              var isMid = (r.category === 'mid_return' || (r.customer_name && r.customer_name.indexOf('(중간 복귀)') !== -1));
-              modalStops.push({
-                id: 'stop_deliv_' + (r.id || idx),
-                type: isMid ? 'mid_return' : 'delivery',
-                order: isMid ? null : (++delivCount),
-                name: r.customer_name || (isMid ? '가산 센터 (중간 복귀)' : '고객사'),
-                addr: r.address || r.customer_address || '',
-                time: r.visit_time || r.delivery_time || '',
-                depart: dep,
-                arrive: arr,
-                status: r.status || '',
-                memo: isMid ? '중간 복귀 및 상차/대기' : (r.items || r.product_name || '')
-              });
-            });
+            // [핵심 가드 1] 타 차량 운행일지에 이미 포함된 배송지는 고유 레코드 ID로 100% 원천 배제!
+            // (동일 고객사 다건 배송의 분할 배차 시 미등록 건이 누락되지 않도록 레코드 ID 기준 엄격 차단)
+            var stopId = 'stop_deliv_' + r.id;
+            if (alreadyAssignedStopIds.has(stopId) || alreadyAssignedStopIds.has(String(r.id))) return false;
 
-            modalStops.push({
-              id: 'stop_return',
-              type: 'return',
-              name: destName,
-              addr: dest,
-              time: '18:00'
-            });
-
-            renderModalStops();
-
-            var recDist = calcRouteDistanceForStops(modalStops);
-            if (recDist > 0) {
-              document.getElementById('modalSuggestedKm').innerText = recDist.toFixed(1) + ' km';
+            // [핵심 가드 2] 모달에 선택된 운전자에게 배정된 배송지만 엄격 허용!
+            if (allowedDrivers.length > 0) {
+              var rDrv = (r.driver_name || '').trim();
+              if (allowedDrivers.indexOf(rDrv) === -1) return false;
             }
+            return true;
+          });
+
+          // stop_order 순서로 정렬하여 중간 복귀 위치 보존
+          eligibleRows.sort(function(a, b) {
+            var aOrder = (a.stop_order !== null && a.stop_order !== undefined) ? Number(a.stop_order) : 9999;
+            var bOrder = (b.stop_order !== null && b.stop_order !== undefined) ? Number(b.stop_order) : 9999;
+            if (aOrder !== bOrder) return aOrder - bOrder;
+            return (a.id || 0) - (b.id || 0);
+          });
+        }
+
+        modalStops = [
+          { id: 'stop_origin', type: 'origin', name: '가산 센터', addr: '서울 금천구 벚꽃로 278 (가산 센터)', time: '08:30' }
+        ];
+
+        var delivCount = 0;
+        eligibleRows.forEach(function(r, idx) {
+          var dep = '', arr = '';
+          if (r.memo_special) {
+            try {
+              var sp = JSON.parse(r.memo_special);
+              dep = sp.depart || '';
+              arr = sp.arrive || '';
+            } catch(e) {}
           }
+          var isMid = (r.category === 'mid_return' || (r.customer_name && r.customer_name.indexOf('(중간 복귀)') !== -1));
+          modalStops.push({
+            id: 'stop_deliv_' + (r.id || idx),
+            type: isMid ? 'mid_return' : 'delivery',
+            order: isMid ? null : (++delivCount),
+            name: r.customer_name || (isMid ? '가산 센터 (중간 복귀)' : '고객사'),
+            addr: r.address || r.customer_address || '',
+            time: r.visit_time || r.delivery_time || '',
+            depart: dep,
+            arrive: arr,
+            status: r.status || '',
+            memo: isMid ? '중간 복귀 및 상차/대기' : (r.items || r.product_name || '')
+          });
+        });
+
+        modalStops.push({
+          id: 'stop_return',
+          type: 'return',
+          name: destName,
+          addr: dest,
+          time: '18:00'
+        });
+
+        renderModalStops();
+
+        var recDist = calcRouteDistanceForStops(modalStops);
+        var recEl = document.getElementById('modalSuggestedKm');
+        if (recEl) {
+          recEl.innerText = recDist > 0 ? recDist.toFixed(1) + ' km' : '0.0 km';
         }
       } catch(e) {
         console.warn('Error loading stops for date:', e);
@@ -4004,7 +4059,7 @@
     }
 
     function onModalDateChanged(newDate) {
-      loadStopsForDate(newDate);
+      loadStopsForDate(newDate, true);
     }
 
     // ==========================================
@@ -4331,14 +4386,20 @@
       var startKm = Number(document.getElementById('modalStartKm').value || 0);
       var endInput = document.getElementById('modalEndKm');
       var driverInput = document.getElementById('modalDriverName');
+      var curVehNo = document.getElementById('modalVehicleNo') ? document.getElementById('modalVehicleNo').value.trim() : currentSelectedVehicleNo;
+      var curVeh = vehiclesMaster.find(function(v) { return v.vehicle_no === curVehNo; }) || {};
 
       if (isChecked) {
         endInput.value = startKm;
         driverInput.value = '미운행';
       } else {
-        if (driverInput.value === '미운행') driverInput.value = '조경찬';
+        if (driverInput.value === '미운행') {
+          driverInput.value = curVeh.default_driver || '김승지';
+        }
       }
       calcModalMileage();
+      var tripDate = document.getElementById('modalTripDate') ? document.getElementById('modalTripDate').value : '';
+      if (tripDate) loadStopsForDate(tripDate, true);
     }
 
     function calcModalMileage() {
@@ -4477,6 +4538,11 @@
       var isClosedVal = existingLog ? Boolean(existingLog.is_closed) : false;
       var closedAtVal = existingLog ? (existingLog.closed_at || '') : '';
 
+      var calcRecDist = calcRouteDistanceForStops(modalStops);
+      var modalSuggText = document.getElementById('modalSuggestedKm') ? document.getElementById('modalSuggestedKm').innerText : '';
+      var parsedModalSugg = parseFloat(modalSuggText);
+      var realSuggestedKm = (calcRecDist > 0) ? Number(calcRecDist.toFixed(1)) : (!isNaN(parsedModalSugg) && parsedModalSugg > 0 ? parsedModalSugg : 0);
+
       var logPayload = {
         vehicle_no: vehicleNo,
         trip_date: tripDate,
@@ -4484,7 +4550,7 @@
         start_km: startKm,
         end_km: endKm,
         distance_km: distanceKm,
-        suggested_distance_km: distanceKm > 0 ? (distanceKm * 0.98).toFixed(1) : 0,
+        suggested_distance_km: realSuggestedKm,
         is_local_departure: (originType === 'custom'),
         origin_addr: finalOriginAddr,
         origin_name: originName,
@@ -5832,10 +5898,15 @@
               return obj;
             });
             try {
-              localStorage.setItem('VEHICLE_DAMAGE_PHOTOS_V1', JSON.stringify(damagePhotos));
-            } catch(e) {
-              console.warn('LocalStorage quota exceeded for damage photos, memory state maintained:', e);
-            }
+              var safeMetaPhotos = damagePhotos.map(function(p) {
+                var copy = Object.assign({}, p);
+                if (copy.photo && copy.photo.length > 200) {
+                  delete copy.photo;
+                }
+                return copy;
+              });
+              localStorage.setItem('VEHICLE_DAMAGE_PHOTOS_V1', JSON.stringify(safeMetaPhotos));
+            } catch(e) {}
           }
         } catch(err) {
           console.warn('Failed to load maintenance data from Supabase:', err);
