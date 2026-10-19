@@ -1697,39 +1697,64 @@
   </div>
 
   <!-- Photo Viewer Lightbox Modal (최상위 z-[10000] 레이어 · 좌우 이전/다음 슬라이드 지원) -->
+  <!-- Photo Viewer Lightbox Modal (최상위 z-[10000] 레이어 · 좌우 이전/다음 슬라이드 · 줌/패닝 · 다운로드 지원) -->
   <div id="photoViewerModal" class="fixed inset-0 bg-slate-900/85 backdrop-blur-sm hidden flex items-center justify-center p-4 z-[10000]" onclick="if(event.target===this)closePhotoViewerModal()">
-    <div class="bg-white rounded-3xl max-w-2xl w-full p-4 shadow-2xl border border-slate-200 space-y-3 flex flex-col max-h-[92vh]" onclick="event.stopPropagation()">
+    <div class="bg-white rounded-3xl max-w-4xl w-full p-4 shadow-2xl border border-slate-200 space-y-3 flex flex-col max-h-[94vh]" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between border-b border-slate-100 pb-2.5 shrink-0">
         <div class="flex items-center gap-2 min-w-0">
           <span class="w-7 h-7 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center text-xs shrink-0">
             <i class="fa-solid fa-camera"></i>
           </span>
-          <h3 id="photoViewerTitle" class="font-black text-xs text-slate-900 truncate max-w-[340px]">현장 사진 확대 보기</h3>
+          <h3 id="photoViewerTitle" class="font-black text-xs text-slate-900 truncate max-w-[260px] sm:max-w-[440px]">현장 사진 확대 보기</h3>
           <span id="photoViewerCounter" class="hidden px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-full font-black text-[10px] border border-indigo-200 shrink-0">1 / 1</span>
         </div>
-        <button type="button" onclick="closePhotoViewerModal()" class="w-7 h-7 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 flex items-center justify-center text-xs shrink-0">
-          <i class="fa-solid fa-xmark"></i>
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" id="photoViewerDownloadBtn" onclick="downloadCurrentPhotoViewerImg()" class="px-2.5 py-1.5 rounded-xl bg-slate-100 hover:bg-indigo-50 hover:text-indigo-700 text-slate-700 font-bold text-xs flex items-center gap-1.5 transition border border-slate-200 shadow-2xs active:scale-95 cursor-pointer" title="현재 사진 원본 다운로드">
+            <i class="fa-solid fa-download text-xs text-indigo-600"></i>
+            <span class="hidden sm:inline">다운로드</span>
+          </button>
+          <button type="button" onclick="closePhotoViewerModal()" class="w-7 h-7 rounded-full bg-slate-100 text-slate-500 hover:text-slate-800 hover:bg-slate-200 flex items-center justify-center text-xs transition cursor-pointer">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
       </div>
-      <div class="relative flex-1 overflow-hidden flex items-center justify-center bg-slate-950 rounded-2xl p-1 min-h-[280px] select-none">
-        <button type="button" id="photoViewerPrevBtn" onclick="event.stopPropagation(); navigatePhotoViewer(-1)" class="hidden absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-indigo-600 text-white border border-white/30 shadow-lg flex items-center justify-center text-sm transition active:scale-95 z-10 cursor-pointer" title="이전 사진 (←)">
+      <div id="photoViewerContainer" class="relative flex-1 overflow-hidden flex items-center justify-center bg-slate-950 rounded-2xl p-1 min-h-[340px] select-none" style="touch-action: none;">
+        <button type="button" id="photoViewerPrevBtn" onclick="event.stopPropagation(); navigatePhotoViewer(-1)" class="hidden absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-indigo-600 text-white border border-white/30 shadow-lg flex items-center justify-center text-sm transition active:scale-95 z-20 cursor-pointer" title="이전 사진 (←)">
           <i class="fa-solid fa-chevron-left"></i>
         </button>
-        <img id="photoViewerImg" src="" alt="현장 사진" class="max-h-[72vh] w-auto max-w-full rounded-xl object-contain shadow-lg">
-        <button type="button" id="photoViewerNextBtn" onclick="event.stopPropagation(); navigatePhotoViewer(1)" class="hidden absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-indigo-600 text-white border border-white/30 shadow-lg flex items-center justify-center text-sm transition active:scale-95 z-10 cursor-pointer" title="다음 사진 (→)">
+        <div id="photoViewerWrapper" class="w-full h-full flex items-center justify-center cursor-default transition-transform duration-75 ease-out" style="transform-origin: center center;">
+          <img id="photoViewerImg" src="" alt="현장 사진" class="max-h-[72vh] w-auto max-w-full rounded-xl object-contain shadow-lg pointer-events-none" style="image-rendering: -webkit-optimize-contrast; image-rendering: high-quality;" draggable="false">
+        </div>
+        <button type="button" id="photoViewerNextBtn" onclick="event.stopPropagation(); navigatePhotoViewer(1)" class="hidden absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-indigo-600 text-white border border-white/30 shadow-lg flex items-center justify-center text-sm transition active:scale-95 z-20 cursor-pointer" title="다음 사진 (→)">
           <i class="fa-solid fa-chevron-right"></i>
         </button>
+        <!-- 플로팅 줌 컨트롤러 바 -->
+        <div id="photoViewerZoomControls" class="absolute bottom-3 left-1/2 -translate-x-1/2 bg-slate-900/85 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/20 text-white flex items-center gap-2 shadow-xl z-20 text-xs" onclick="event.stopPropagation()">
+          <button type="button" onclick="adjustPhotoViewerZoom(-0.25)" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/25 active:scale-95 flex items-center justify-center transition cursor-pointer" title="축소 (Ctrl/휠 아래, -키)">
+            <i class="fa-solid fa-minus text-[10px]"></i>
+          </button>
+          <button type="button" onclick="resetPhotoViewerZoom()" id="photoViewerZoomLevelBtn" class="px-2 py-0.5 rounded-md bg-white/10 hover:bg-white/20 font-mono font-black text-[11px] min-w-[50px] text-center transition cursor-pointer" title="클릭 시 100% 원본 초기화 (0키)">
+            100%
+          </button>
+          <button type="button" onclick="adjustPhotoViewerZoom(0.25)" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/25 active:scale-95 flex items-center justify-center transition cursor-pointer" title="확대 (Ctrl/휠 위, +키)">
+            <i class="fa-solid fa-plus text-[10px]"></i>
+          </button>
+          <div class="w-px h-3.5 bg-white/20 mx-0.5"></div>
+          <button type="button" onclick="resetPhotoViewerZoom()" class="w-6 h-6 rounded-full bg-white/10 hover:bg-white/25 active:scale-95 flex items-center justify-center transition cursor-pointer" title="배율 및 위치 초기화 (R키)">
+            <i class="fa-solid fa-rotate-left text-[10px]"></i>
+          </button>
+        </div>
       </div>
       <div class="flex items-center justify-between pt-1 shrink-0 text-xs">
-        <span id="photoViewerFooterHint" class="text-[11px] text-slate-400 font-medium">현장 기사가 촬영 및 첨부한 원본 사진입니다.</span>
+        <span id="photoViewerFooterHint" class="text-[11px] text-slate-400 font-medium">마우스 휠이나 +/- 버튼으로 확대하고, 드래그하여 이동할 수 있습니다.</span>
         <div class="flex items-center gap-1.5">
-          <button type="button" id="photoViewerPrevBottomBtn" onclick="navigatePhotoViewer(-1)" class="hidden px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+          <button type="button" id="photoViewerPrevBottomBtn" onclick="navigatePhotoViewer(-1)" class="hidden px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
             ◀ 이전
           </button>
-          <button type="button" id="photoViewerNextBottomBtn" onclick="navigatePhotoViewer(1)" class="hidden px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition">
+          <button type="button" id="photoViewerNextBottomBtn" onclick="navigatePhotoViewer(1)" class="hidden px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
             다음 ▶
           </button>
-          <button type="button" onclick="closePhotoViewerModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs">
+          <button type="button" onclick="closePhotoViewerModal()" class="px-4 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-bold rounded-xl text-xs cursor-pointer">
             닫기
           </button>
         </div>
@@ -4527,10 +4552,202 @@
     }
 
     // ==========================================
-    // Photo Viewer Lightbox Engine (좌우 이전/다음 슬라이드 지원)
+    // Photo Viewer Lightbox Engine (좌우 슬라이드 · 줌/패닝 · 다운로드)
     // ==========================================
     var photoViewerGallery = []; // [ { src, title } ]
     var photoViewerCurrentIdx = 0;
+    var photoViewerZoom = 1.0;
+    var photoViewerPanX = 0;
+    var photoViewerPanY = 0;
+    var photoViewerIsDragging = false;
+    var photoViewerDragStartX = 0;
+    var photoViewerDragStartY = 0;
+    var photoViewerInitialPanX = 0;
+    var photoViewerInitialPanY = 0;
+
+    function updatePhotoViewerTransform(smooth) {
+      var wrapper = document.getElementById('photoViewerWrapper');
+      var zoomBtn = document.getElementById('photoViewerZoomLevelBtn');
+      if (!wrapper) return;
+
+      if (smooth) {
+        wrapper.style.transition = 'transform 0.15s ease-out';
+      } else {
+        wrapper.style.transition = 'none';
+      }
+
+      wrapper.style.transform = 'translate(' + photoViewerPanX + 'px, ' + photoViewerPanY + 'px) scale(' + photoViewerZoom + ')';
+      if (zoomBtn) {
+        zoomBtn.innerText = Math.round(photoViewerZoom * 100) + '%';
+      }
+
+      if (photoViewerZoom > 1.05) {
+        wrapper.classList.remove('cursor-default');
+        if (photoViewerIsDragging) {
+          wrapper.classList.add('cursor-grabbing');
+          wrapper.classList.remove('cursor-grab');
+        } else {
+          wrapper.classList.add('cursor-grab');
+          wrapper.classList.remove('cursor-grabbing');
+        }
+      } else {
+        wrapper.classList.remove('cursor-grab', 'cursor-grabbing');
+        wrapper.classList.add('cursor-default');
+      }
+    }
+
+    function adjustPhotoViewerZoom(delta, centerX, centerY) {
+      var oldZoom = photoViewerZoom;
+      var newZoom = Math.min(5.0, Math.max(0.5, Math.round((photoViewerZoom + delta) * 100) / 100));
+      if (newZoom === oldZoom) return;
+
+      if (newZoom <= 1.0) {
+        photoViewerZoom = newZoom;
+        photoViewerPanX = 0;
+        photoViewerPanY = 0;
+      } else {
+        if (typeof centerX === 'number' && typeof centerY === 'number') {
+          var factor = newZoom / oldZoom;
+          photoViewerPanX = centerX - factor * (centerX - photoViewerPanX);
+          photoViewerPanY = centerY - factor * (centerY - photoViewerPanY);
+        }
+        photoViewerZoom = newZoom;
+      }
+      updatePhotoViewerTransform(true);
+    }
+
+    function resetPhotoViewerZoom() {
+      photoViewerZoom = 1.0;
+      photoViewerPanX = 0;
+      photoViewerPanY = 0;
+      photoViewerIsDragging = false;
+      updatePhotoViewerTransform(true);
+    }
+
+    function setupPhotoViewerInteractions() {
+      var container = document.getElementById('photoViewerContainer');
+      if (!container || container._hasInteractions) return;
+      container._hasInteractions = true;
+
+      // 마우스 휠 줌 (위: 확대, 아래: 축소)
+      container.addEventListener('wheel', function(e) {
+        e.preventDefault();
+        var rect = container.getBoundingClientRect();
+        var mouseX = e.clientX - rect.left - rect.width / 2;
+        var mouseY = e.clientY - rect.top - rect.height / 2;
+        var delta = e.deltaY < 0 ? 0.25 : -0.25;
+        adjustPhotoViewerZoom(delta, mouseX, mouseY);
+      }, { passive: false });
+
+      // 마우스 드래그 / 패닝 (확대 상태에서만 활성화)
+      container.addEventListener('mousedown', function(e) {
+        if (photoViewerZoom <= 1.05 || e.button !== 0) return;
+        if (e.target.closest('button') || e.target.closest('#photoViewerZoomControls')) return;
+        e.preventDefault();
+        photoViewerIsDragging = true;
+        photoViewerDragStartX = e.clientX;
+        photoViewerDragStartY = e.clientY;
+        photoViewerInitialPanX = photoViewerPanX;
+        photoViewerInitialPanY = photoViewerPanY;
+        updatePhotoViewerTransform(false);
+      });
+
+      window.addEventListener('mousemove', function(e) {
+        if (!photoViewerIsDragging) return;
+        e.preventDefault();
+        var dx = e.clientX - photoViewerDragStartX;
+        var dy = e.clientY - photoViewerDragStartY;
+        photoViewerPanX = photoViewerInitialPanX + dx;
+        photoViewerPanY = photoViewerInitialPanY + dy;
+        updatePhotoViewerTransform(false);
+      });
+
+      window.addEventListener('mouseup', function(e) {
+        if (photoViewerIsDragging) {
+          photoViewerIsDragging = false;
+          updatePhotoViewerTransform(false);
+        }
+      });
+
+      // 더블 클릭 스마트 토글 (100% ↔ 200%)
+      container.addEventListener('dblclick', function(e) {
+        if (e.target.closest('button') || e.target.closest('#photoViewerZoomControls')) return;
+        e.preventDefault();
+        if (photoViewerZoom > 1.05) {
+          resetPhotoViewerZoom();
+        } else {
+          var rect = container.getBoundingClientRect();
+          var mouseX = e.clientX - rect.left - rect.width / 2;
+          var mouseY = e.clientY - rect.top - rect.height / 2;
+          adjustPhotoViewerZoom(1.0, mouseX, mouseY);
+        }
+      });
+    }
+
+    function downloadCurrentPhotoViewerImg() {
+      if (!photoViewerGallery || photoViewerGallery.length === 0) {
+        if (typeof showToast === 'function') showToast('다운로드할 사진이 없습니다.');
+        return;
+      }
+      var item = photoViewerGallery[photoViewerCurrentIdx];
+      if (!item || !item.src) {
+        if (typeof showToast === 'function') showToast('유효하지 않은 사진 데이터입니다.');
+        return;
+      }
+
+      var rawTitle = (item.title || '현장사진').replace(/\[📷\s*사진\s*확인\]/g, '').replace(/\[📷\]/g, '').trim();
+      rawTitle = rawTitle.replace(/\b\d+\s*\/\s*\d+\b/g, '').trim();
+      var safeName = rawTitle.replace(/[\\/:*?"<>|()[\]]/g, '_').replace(/_+/g, '_').trim();
+      if (safeName.startsWith('_')) safeName = safeName.substring(1);
+      if (safeName.endsWith('_')) safeName = safeName.substring(0, safeName.length - 1);
+
+      var now = new Date();
+      var dateStr = now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + String(now.getDate()).padStart(2, '0') + '_' + String(now.getHours()).padStart(2, '0') + String(now.getMinutes()).padStart(2, '0');
+      var filename = (safeName || '현장사진') + '_' + dateStr + '.jpg';
+
+      var src = item.src;
+      if (src.indexOf('data:image/png') === 0) {
+        filename = (safeName || '현장사진') + '_' + dateStr + '.png';
+      }
+
+      if (src.indexOf('data:') === 0) {
+        var a = document.createElement('a');
+        a.href = src;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        if (typeof showToast === 'function') showToast('📥 사진이 다운로드되었습니다.');
+      } else {
+        if (typeof showToast === 'function') showToast('📥 사진 다운로드 준비 중...');
+        fetch(src)
+          .then(function(res) {
+            if (!res.ok) throw new Error('Fetch failed with status ' + res.status);
+            return res.blob();
+          })
+          .then(function(blob) {
+            var blobUrl = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 1500);
+            if (typeof showToast === 'function') showToast('📥 사진이 성공적으로 다운로드되었습니다.');
+          })
+          .catch(function(err) {
+            console.warn('Direct blob download failed, fallback:', err);
+            var a = document.createElement('a');
+            a.href = src;
+            a.download = filename;
+            a.target = '_blank';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          });
+      }
+    }
 
     function renderPhotoViewerSlide() {
       var img = document.getElementById('photoViewerImg');
@@ -4541,6 +4758,8 @@
       var prevBottomBtn = document.getElementById('photoViewerPrevBottomBtn');
       var nextBottomBtn = document.getElementById('photoViewerNextBottomBtn');
       var hintEl = document.getElementById('photoViewerFooterHint');
+
+      resetPhotoViewerZoom();
 
       if (!photoViewerGallery || photoViewerGallery.length === 0) return;
       if (photoViewerCurrentIdx < 0) photoViewerCurrentIdx = photoViewerGallery.length - 1;
@@ -4567,7 +4786,7 @@
       if (prevBottomBtn) prevBottomBtn.classList.toggle('hidden', !hasMulti);
       if (nextBottomBtn) nextBottomBtn.classList.toggle('hidden', !hasMulti);
       if (hintEl) {
-        hintEl.innerText = hasMulti ? '양옆 화살표(◀/▶) 또는 키보드 방향키(←/→)로 이전·다음 사진을 확인하세요.' : '현장 기사가 촬영 및 첨부한 원본 사진입니다.';
+        hintEl.innerText = hasMulti ? '양옆 화살표(◀/▶) 또는 키보드 방향키(←/→)로 이전·다음 사진을 확인하세요. (휠/버튼: 확대축소, 드래그: 이동)' : '마우스 휠이나 +/- 버튼으로 확대하고, 드래그하여 이동할 수 있습니다.';
       }
     }
 
@@ -4592,6 +4811,7 @@
 
     function openPhotoViewerModal(src, title, galleryList, startIdx) {
       if (!src && (!Array.isArray(galleryList) || galleryList.length === 0)) return;
+      setupPhotoViewerInteractions();
       if (Array.isArray(galleryList) && galleryList.length > 0) {
         photoViewerGallery = galleryList;
         photoViewerCurrentIdx = (typeof startIdx === 'number' && startIdx >= 0 && startIdx < galleryList.length) ? startIdx : 0;
@@ -4619,6 +4839,7 @@
     }
 
     function closePhotoViewerModal() {
+      resetPhotoViewerZoom();
       var modal = document.getElementById('photoViewerModal');
       if (modal) modal.classList.add('hidden');
     }
@@ -4635,6 +4856,15 @@
       } else if (e.key === 'Escape') {
         e.preventDefault();
         closePhotoViewerModal();
+      } else if (e.key === '+' || e.key === '=') {
+        e.preventDefault();
+        adjustPhotoViewerZoom(0.25);
+      } else if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        adjustPhotoViewerZoom(-0.25);
+      } else if (e.key === '0' || e.key === 'r' || e.key === 'R') {
+        e.preventDefault();
+        resetPhotoViewerZoom();
       }
     });
 
@@ -5383,7 +5613,7 @@
           var img = new Image();
           img.onload = function() {
             try {
-              var maxDim = 1200;
+              var maxDim = 1600; // 골디락스 고화질 규격 (FHD급 해상도 + DB 용량 절약 최적화)
               var width = img.width;
               var height = img.height;
               if (width > height) {
@@ -5417,7 +5647,7 @@
               var uploaderClean = (uploaderName || '출고담당').slice(0, 8);
               var wmText = '[ ' + dateStr + ' | ' + custClean + ' | 촬영: ' + uploaderClean + ' ]';
 
-              var fontSize = Math.max(14, Math.min(26, Math.round(width * 0.022)));
+              var fontSize = Math.max(15, Math.min(32, Math.round(width * 0.021)));
               ctx.font = 'bold ' + fontSize + 'px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
               var textWidth = ctx.measureText(wmText).width;
               var padX = fontSize * 0.7;
@@ -5457,7 +5687,7 @@
               ctx.fillText(wmText, badgeX + padX, badgeY + badgeH / 2);
               ctx.restore();
 
-              var base64 = canvas.toDataURL('image/jpeg', 0.75);
+              var base64 = canvas.toDataURL('image/jpeg', 0.82);
               resolve({
                 id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
                 data: base64,
