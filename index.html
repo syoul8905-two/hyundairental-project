@@ -4809,6 +4809,25 @@
       openPhotoViewerModal(list[targetIdx].src, list[targetIdx].title, list, targetIdx);
     }
 
+    function openRecordMemoPhotoViewer(recordIdx, photoIdx) {
+      var r = (typeof records !== 'undefined' && records[recordIdx]) ||
+              (typeof filteredRecords !== 'undefined' && filteredRecords[recordIdx]) || 
+              (typeof currentRecords !== 'undefined' && currentRecords[recordIdx]);
+      if (!r) return;
+      var times = getStopTimes(r);
+      var photos = (Array.isArray(times.photos) && times.photos.length > 0) ? times.photos : (times.photo ? [times.photo] : []);
+      if (photos.length === 0) return;
+      var cust = r.고객사 || r.customer_name || '현장';
+      var list = photos.map(function(p, i) {
+        return {
+          src: p,
+          title: cust + ' 현장 사진 #' + (i + 1) + ' / ' + photos.length
+        };
+      });
+      var targetIdx = (typeof photoIdx === 'number' && photoIdx >= 0 && photoIdx < list.length) ? photoIdx : 0;
+      openPhotoViewerModal(list[targetIdx].src, list[targetIdx].title, list, targetIdx);
+    }
+
     function openPhotoViewerModal(src, title, galleryList, startIdx) {
       if (!src && (!Array.isArray(galleryList) || galleryList.length === 0)) return;
       setupPhotoViewerInteractions();
@@ -4875,6 +4894,7 @@
       var issue = '';
       var issueAuthor = '';
       var photo = '';
+      var photos = [];
       var inspectPhotos = [];
       var local_dismissal = false;
       var dismissal_type = 'registered';
@@ -4892,6 +4912,12 @@
             issue = parsed.issue || '';
             issueAuthor = parsed.issue_author || parsed.issueAuthor || '';
             photo = parsed.photo || '';
+            if (Array.isArray(parsed.photos) && parsed.photos.length > 0) {
+              photos = parsed.photos.filter(function(p) { return !!p; });
+              if (!photo && photos.length > 0) photo = photos[0];
+            } else if (photo) {
+              photos = [photo];
+            }
             if (Array.isArray(parsed.inspectPhotos) && parsed.inspectPhotos.length > 0) {
               inspectPhotos = parsed.inspectPhotos.map(function(item, idx) {
                 if (typeof item === 'string') {
@@ -4934,6 +4960,7 @@
         issue: issue,
         issueAuthor: issueAuthor,
         photo: photo,
+        photos: photos,
         inspectPhotos: inspectPhotos,
         local_dismissal: local_dismissal,
         dismissal_type: dismissal_type,
@@ -6374,7 +6401,24 @@
               </div>
             ` : ''}
 
-            ${times.photo ? `
+            ${(times.photos && times.photos.length > 0) ? `
+              <div class="mx-2 ml-6 p-2 bg-slate-50 border border-slate-200 rounded-lg space-y-1.5" onclick="event.stopPropagation()">
+                <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  ${times.photos.map((pUrl, pIdx) => `
+                    <div class="relative shrink-0">
+                      <img src="${pUrl}" onclick="openRecordMemoPhotoViewer(${realIdx}, ${pIdx})" class="w-12 h-12 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80 transition" alt="현장 사진">
+                      <span class="absolute bottom-0.5 right-0.5 bg-black/75 text-white text-[8px] font-bold px-1 rounded">${pIdx + 1}</span>
+                    </div>
+                  `).join('')}
+                </div>
+                <div class="flex items-center justify-between">
+                  <span class="text-[10px] font-black text-indigo-900 flex items-center gap-1 cursor-pointer hover:underline" onclick="openRecordMemoPhotoViewer(${realIdx}, 0)">
+                    <i class="fa-solid fa-camera text-indigo-600"></i> 현장 사진 (${times.photos.length}장 첨부됨)
+                  </span>
+                  <span class="text-[9px] text-slate-400">클릭하여 확대 보기</span>
+                </div>
+              </div>
+            ` : (times.photo ? `
               <div class="mx-2 ml-6 p-2 bg-slate-50 border border-slate-200 rounded-lg flex items-center gap-2.5">
                 <img src="${times.photo}" onclick="event.stopPropagation(); openPhotoViewerModal('${times.photo.replace(/'/g, "\\'")}', '${r.고객사}')" class="w-12 h-12 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80 transition" alt="현장 사진">
                 <div class="flex flex-col justify-center">
@@ -6384,7 +6428,7 @@
                   <span class="text-[9px] text-slate-400">클릭하여 확대 보기</span>
                 </div>
               </div>
-            ` : ''}
+            ` : '')}
 
             ${(times.inspectPhotos && times.inspectPhotos.length > 0) ? `
               <div class="mx-2 ml-6 p-1.5 bg-amber-50/80 border border-amber-200 rounded-xl flex items-center justify-between gap-2 cursor-pointer hover:bg-amber-100/60 transition" onclick="event.stopPropagation(); openParcelInspectPhotoModal(${realIdx});">
@@ -8029,14 +8073,25 @@
                 <span class="truncate max-w-[190px]">현장: ${times.issue}</span>
               </div>
             ` : ''}
-            ${times.photo ? `
+            ${(times.photos && times.photos.length > 0) ? `
+              <div class="mt-1 flex items-center gap-1.5 flex-wrap">
+                <div class="flex items-center -space-x-1.5 overflow-hidden py-0.5">
+                  ${times.photos.slice(0, 3).map((pUrl, pIdx) => `
+                    <img src="${pUrl}" onclick="openRecordMemoPhotoViewer(${realIdx}, ${pIdx})" class="w-6 h-6 rounded object-cover border border-slate-300 shadow-2xs cursor-pointer hover:opacity-80 hover:z-10 transition shrink-0" alt="사진 ${pIdx+1}">
+                  `).join('')}
+                </div>
+                <button type="button" onclick="openRecordMemoPhotoViewer(${realIdx}, 0)" class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5">
+                  <i class="fa-solid fa-camera text-[9px]"></i> 사진(${times.photos.length}장)
+                </button>
+              </div>
+            ` : (times.photo ? `
               <div class="mt-1 flex items-center gap-1.5">
                 <img src="${times.photo}" onclick="openPhotoViewerModal('${times.photo.replace(/'/g, "\\'")}', '${r.고객사}')" class="w-6 h-6 rounded object-cover border border-slate-300 shadow-2xs cursor-pointer hover:opacity-80" alt="사진">
                 <button type="button" onclick="openPhotoViewerModal('${times.photo.replace(/'/g, "\\'")}', '${r.고객사}')" class="text-[10px] text-indigo-600 hover:text-indigo-800 font-bold flex items-center gap-0.5">
                   <i class="fa-solid fa-camera text-[9px]"></i> 사진확인
                 </button>
               </div>
-            ` : ''}
+            ` : '')}
             ${(histInfo && histInfo.latestIssueItem && (histInfo.latestIssueItem.issue || histInfo.latestIssueItem.photo)) ? `
               <div class="mt-1 px-1.5 py-0.5 bg-amber-50 border border-amber-300 rounded text-[10px] text-amber-900 font-bold flex items-center justify-between gap-1 cursor-pointer hover:bg-amber-100 transition shadow-2xs" onclick="openContractHistoryModal('${r.계약번호}')" title="과거 출고 당시 기사 특이사항: ${histInfo.latestIssueItem.issue || '사진등록'} (${histInfo.latestIssueItem.delivery_date} · ${histInfo.latestIssueItem.driver_name || ''})">
                 <div class="flex items-center gap-1 truncate">
@@ -8852,7 +8907,24 @@
             </div>
           ` : ''}
 
-          ${times.photo ? `
+          ${(times.photos && times.photos.length > 0) ? `
+            <div class="p-2 bg-slate-50 border border-slate-200 rounded-xl space-y-1.5" onclick="event.stopPropagation()">
+              <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                ${times.photos.map((pUrl, pIdx) => `
+                  <div class="relative shrink-0">
+                    <img src="${pUrl}" onclick="openRecordMemoPhotoViewer(${realIdx}, ${pIdx})" class="w-12 h-12 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80" alt="현장 사진">
+                    <span class="absolute bottom-0.5 right-0.5 bg-black/75 text-white text-[8px] font-bold px-1 rounded">${pIdx + 1}</span>
+                  </div>
+                `).join('')}
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-black text-indigo-950 flex items-center gap-1 cursor-pointer" onclick="openRecordMemoPhotoViewer(${realIdx}, 0)">
+                  <i class="fa-solid fa-camera text-indigo-600"></i> 현장 사진 (${times.photos.length}장 첨부됨)
+                </span>
+                <p class="text-[10px] text-slate-400">터치하여 확대 보기</p>
+              </div>
+            </div>
+          ` : (times.photo ? `
             <div class="p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2.5">
               <img src="${times.photo}" onclick="openPhotoViewerModal('${times.photo.replace(/'/g, "\\'")}', '${r.고객사}')" class="w-12 h-12 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80" alt="현장 사진">
               <div class="flex-1">
@@ -8862,7 +8934,7 @@
                 <p class="text-[10px] text-slate-400">터치하여 확대 보기</p>
               </div>
             </div>
-          ` : ''}
+          ` : '')}
 
           <!-- Time Record Badges & Action Buttons -->
           <div class="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
@@ -10528,10 +10600,11 @@
       }
 
       if (tabKey === 'photos') {
-        var hasFieldPhoto = !!(parsed.photo && String(parsed.photo).trim());
+        var hasFieldPhoto = !!((Array.isArray(parsed.photos) && parsed.photos.length > 0) || (parsed.photo && String(parsed.photo).trim()));
+        var memoPhotoLen = Array.isArray(parsed.photos) ? parsed.photos.length : (hasFieldPhoto ? 1 : 0);
         var inspectLen = Array.isArray(parsed.inspectPhotos) ? parsed.inspectPhotos.length : 0;
         if (!hasFieldPhoto && inspectLen === 0) return null;
-        return rowId + '|photos|' + (hasFieldPhoto ? '1' : '0') + '|' + inspectLen;
+        return rowId + '|photos|' + memoPhotoLen + '|' + inspectLen;
       }
 
       return null;
@@ -10919,7 +10992,7 @@
         if (tabKey === 'issues') {
           return !!(parsed && parsed.issue && String(parsed.issue).trim());
         } else if (tabKey === 'photos') {
-          var hasFieldPhoto = !!(parsed && parsed.photo && String(parsed.photo).trim());
+          var hasFieldPhoto = !!(parsed && ((Array.isArray(parsed.photos) && parsed.photos.length > 0) || (parsed.photo && String(parsed.photo).trim())));
           var hasInspectPhotos = !!(parsed && Array.isArray(parsed.inspectPhotos) && parsed.inspectPhotos.length > 0);
           return hasFieldPhoto || hasInspectPhotos;
         }
@@ -11031,6 +11104,33 @@
       }).filter(function(g) { return !!g.src; });
 
       if (galleryList.length === 0) return;
+      var targetIdx = Math.min(Math.max(0, photoIdx || 0), galleryList.length - 1);
+      openPhotoViewerModal(galleryList[targetIdx].src, galleryList[targetIdx].title, galleryList, targetIdx);
+    }
+
+    function openContractHistoryMemoPhoto(rowIdx, photoIdx) {
+      var row = _currentHistoryRowsCache[rowIdx];
+      if (!row) return;
+      var cust = row.customer_name || row.고객사 || '고객사';
+      var contract = row.contract_no || row.계약번호 || '';
+      var memoSpecialRaw = row.memo_special || row.추후일정_특이사항 || '';
+      var photos = [];
+      try {
+        var p = JSON.parse(memoSpecialRaw);
+        if (p && Array.isArray(p.photos) && p.photos.length > 0) {
+          photos = p.photos;
+        } else if (p && p.photo) {
+          photos = [p.photo];
+        }
+      } catch(e) {}
+      if (photos.length === 0) return;
+
+      var galleryList = photos.map(function(src, i) {
+        return {
+          src: src,
+          title: cust + (contract ? ' (' + contract + ')' : '') + ' - 현장 사진 ' + (i + 1) + ' / ' + photos.length
+        };
+      });
       var targetIdx = Math.min(Math.max(0, photoIdx || 0), galleryList.length - 1);
       openPhotoViewerModal(galleryList[targetIdx].src, galleryList[targetIdx].title, galleryList, targetIdx);
     }
@@ -11172,6 +11272,7 @@
         var issue = '';
         var issueAuthor = '';
         var photo = '';
+        var photos = [];
         var inspectPhotos = [];
         if (memoSpecialRaw) {
           try {
@@ -11181,7 +11282,13 @@
               arrive = p.arrive || '';
               issue = p.issue || '';
               issueAuthor = p.issue_author || '';
-              photo = p.photo || '';
+              if (Array.isArray(p.photos) && p.photos.length > 0) {
+                photos = p.photos;
+                photo = photos[0];
+              } else if (p.photo) {
+                photo = p.photo;
+                photos = [photo];
+              }
               if (Array.isArray(p.inspectPhotos)) inspectPhotos = p.inspectPhotos;
             }
           } catch(e) {
@@ -11242,13 +11349,20 @@
               </div>
             ` : ''}
 
-            <!-- 당시 현장 사진 -->
-            ${photo ? `
-              <div class="p-2 bg-white rounded-xl border border-slate-200 flex items-center gap-2.5">
-                <img src="${photo}" onclick="openPhotoViewerModal('${photo.replace(/'/g, "\\'")}', '${cust.replace(/'/g, "\\'")} (${contract})')" class="w-14 h-14 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80 shrink-0" alt="현장 사진">
+            <!-- 당시 현장 사진 (복수 지원) -->
+            ${(photos.length > 0) ? `
+              <div class="p-2 bg-white rounded-xl border border-slate-200 space-y-1.5">
+                <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
+                  ${photos.map((pUrl, pIdx) => `
+                    <div class="relative shrink-0">
+                      <img src="${pUrl}" onclick="openContractHistoryMemoPhoto(${rowIdx}, ${pIdx})" class="w-14 h-14 rounded-lg object-cover border border-slate-300 shadow-xs cursor-pointer hover:opacity-80 transition" alt="현장 사진">
+                      <span class="absolute bottom-0.5 right-0.5 bg-black/75 text-white text-[8px] font-bold px-1 rounded">${pIdx + 1}</span>
+                    </div>
+                  `).join('')}
+                </div>
                 <div class="text-xs">
-                  <span class="font-black text-indigo-900 flex items-center gap-1 cursor-pointer hover:underline" onclick="openPhotoViewerModal('${photo.replace(/'/g, "\\'")}', '${cust.replace(/'/g, "\\'")} (${contract})')">
-                    <i class="fa-solid fa-camera text-indigo-600"></i> 당시 현장 사진
+                  <span class="font-black text-indigo-900 flex items-center gap-1 cursor-pointer hover:underline" onclick="openContractHistoryMemoPhoto(${rowIdx}, 0)">
+                    <i class="fa-solid fa-camera text-indigo-600"></i> 당시 현장 사진 (${photos.length}장)
                   </span>
                   <span class="text-[10px] text-slate-500 block">배송/회수 현장에서 기사가 등록한 사진입니다. (클릭 확대)</span>
                 </div>

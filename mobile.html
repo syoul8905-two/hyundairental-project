@@ -1027,7 +1027,7 @@
         </div>
         <!-- Photo Inputs: 1) Camera Direct 2) Gallery/File Pick -->
         <input type="file" id="memoModalCameraInput" accept="image/*" capture="environment" class="hidden" onchange="handleModalPhotoUpload(event)">
-        <input type="file" id="memoModalGalleryInput" accept="image/*" class="hidden" onchange="handleModalPhotoUpload(event)">
+        <input type="file" id="memoModalGalleryInput" accept="image/*" multiple class="hidden" onchange="handleModalPhotoUpload(event)">
         <div id="memoModalPhotoContainer" class="space-y-2">
           <!-- Dynamic Photo Preview / Upload Button -->
         </div>
@@ -1938,6 +1938,7 @@
       var issue = '';
       var issueAuthor = '';
       var photo = '';
+      var photos = [];
       var inspectPhotos = [];
       var updated_at = '';
       var local_dismissal = false;
@@ -1955,6 +1956,12 @@
             issue = parsed.issue || '';
             issueAuthor = parsed.issue_author || parsed.issueAuthor || parsed.author || '';
             photo = parsed.photo || '';
+            if (Array.isArray(parsed.photos) && parsed.photos.length > 0) {
+              photos = parsed.photos.filter(function(p) { return !!p; });
+              if (!photo && photos.length > 0) photo = photos[0];
+            } else if (photo) {
+              photos = [photo];
+            }
             updated_at = parsed.updated_at || '';
             if (Array.isArray(parsed.inspectPhotos) && parsed.inspectPhotos.length > 0) {
               inspectPhotos = parsed.inspectPhotos.map(function(item, idx) {
@@ -1997,6 +2004,7 @@
         issue: issue,
         issueAuthor: issueAuthor,
         photo: photo,
+        photos: photos,
         inspectPhotos: inspectPhotos,
         updated_at: updated_at,
         local_dismissal: local_dismissal,
@@ -4204,6 +4212,9 @@
             if (Date.now() - lock.time < 15000) { // 15초간 최신 로컬 메모 강력 보호
               var times = getStopTimes(row);
               times.issue = lock.issue;
+              if (lock.photos !== undefined) {
+                times.photos = lock.photos;
+              }
               if (lock.photo !== undefined) {
                 times.photo = lock.photo;
               }
@@ -4553,7 +4564,7 @@
               </div>
             ` : ''}
 
-            ${(times.issue || times.photo) ? `
+            ${(times.issue || (times.photos && times.photos.length > 0) || times.photo) ? `
               <div onclick="openMobileMemoModal(${idx})" class="p-2.5 bg-amber-50/90 border border-amber-200 rounded-xl space-y-1.5 cursor-pointer hover:bg-amber-100/80 active:scale-99 transition shadow-2xs">
                 <div class="flex items-center justify-between">
                   <span class="text-[11px] font-black text-amber-900 flex items-center gap-1">
@@ -4565,19 +4576,33 @@
                   </div>
                 </div>
                 ${times.issue ? `<p class="text-xs text-amber-950 font-medium break-all whitespace-pre-line leading-relaxed">${times.issue}</p>` : ''}
-                ${times.photo ? `
+                ${(times.photos && times.photos.length > 0) ? `
+                  <div class="pt-1 space-y-1" onclick="event.stopPropagation()">
+                    <div class="flex items-center gap-2 overflow-x-auto pb-1">
+                      ${times.photos.map((pUrl, pIdx) => `
+                        <div class="relative shrink-0">
+                          <img src="${pUrl}" onclick="openMobileCardMemoPhoto(${idx}, ${pIdx})" class="w-12 h-12 object-cover rounded-lg border-2 border-amber-400 shadow-xs cursor-pointer hover:opacity-90 active:scale-95 transition" title="터치 시 확대">
+                          <span class="absolute bottom-0.5 right-0.5 bg-black/75 text-white text-[8px] font-black px-1 rounded">${pIdx + 1}</span>
+                        </div>
+                      `).join('')}
+                    </div>
+                    <span class="text-[10px] text-amber-800 font-bold flex items-center gap-1">
+                      <i class="fa-solid fa-camera text-amber-600"></i> 현장 사진 (${times.photos.length}장 · 터치 시 확대)
+                    </span>
+                  </div>
+                ` : (times.photo ? `
                   <div class="pt-1 flex items-center gap-2">
-                    <img src="${times.photo}" onclick="event.stopPropagation(); openMobileCardMemoPhoto(${idx})" class="w-12 h-12 object-cover rounded-lg border-2 border-amber-400 shadow-xs cursor-pointer hover:opacity-90" title="확대보기">
+                    <img src="${times.photo}" onclick="event.stopPropagation(); openMobileCardMemoPhoto(${idx}, 0)" class="w-12 h-12 object-cover rounded-lg border-2 border-amber-400 shadow-xs cursor-pointer hover:opacity-90" title="확대보기">
                     <span class="text-[10px] text-amber-800 font-bold">📷 현장 사진 (터치 시 확대)</span>
                   </div>
-                ` : ''}
+                ` : '')}
               </div>
             ` : ''}
 
             <div class="grid grid-cols-12 gap-1.5">
-              <button type="button" onclick="openMobileMemoModal(${idx})" class="col-span-7 py-2.5 px-2.5 ${(times.issue || times.photo) ? 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border-slate-200' : 'bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 border-indigo-200'} font-black text-xs rounded-xl border shadow-2xs flex items-center justify-center gap-1 transition active:scale-98">
-                <i class="fa-solid fa-pen-to-square ${(times.issue || times.photo) ? 'text-slate-500' : 'text-indigo-600'}"></i>
-                <span class="truncate">${(times.issue || times.photo) ? '현장 특이사항 / 사진 수정' : '📝 현장 특이사항 / 사진 등록'}</span>
+              <button type="button" onclick="openMobileMemoModal(${idx})" class="col-span-7 py-2.5 px-2.5 ${(times.issue || (times.photos && times.photos.length > 0) || times.photo) ? 'bg-slate-50 hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 border-slate-200' : 'bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 border-indigo-200'} font-black text-xs rounded-xl border shadow-2xs flex items-center justify-center gap-1 transition active:scale-98">
+                <i class="fa-solid fa-pen-to-square ${(times.issue || (times.photos && times.photos.length > 0) || times.photo) ? 'text-slate-500' : 'text-indigo-600'}"></i>
+                <span class="truncate">${(times.issue || (times.photos && times.photos.length > 0) || times.photo) ? '현장 특이사항 / 사진 수정' : '📝 현장 특이사항 / 사진 등록'}</span>
               </button>
               <button type="button" onclick="openMobileParcelInspectModal(${idx})" class="col-span-5 py-2.5 px-2.5 ${(times.inspectPhotos && times.inspectPhotos.length > 0) ? 'bg-amber-100 hover:bg-amber-200 text-amber-950 border-amber-300' : 'bg-amber-50/80 hover:bg-amber-100 text-amber-900 border-amber-200'} font-black text-xs rounded-xl border shadow-2xs flex items-center justify-center gap-1 transition active:scale-98" title="출고 검수 사진 등록/확인 (최대 10장)">
                 <i class="fa-solid fa-camera text-amber-600"></i>
@@ -4948,7 +4973,8 @@
     // (완전 격리 바텀시트 모달로 백그라운드 리렌더링 간섭 0%)
     // ==========================================
     var activeModalMemoIdx = null;
-    var cachedModalPhotoBase64 = '';
+    var cachedModalPhotos = [];
+    var MAX_MEMO_PHOTOS = 5;
 
     function openMobileMemoModal(idx) {
       var r = driverRecords[idx];
@@ -4956,7 +4982,13 @@
       activeModalMemoIdx = idx;
 
       var times = getStopTimes(r);
-      cachedModalPhotoBase64 = times.photo || '';
+      if (Array.isArray(times.photos) && times.photos.length > 0) {
+        cachedModalPhotos = times.photos.slice(0, MAX_MEMO_PHOTOS);
+      } else if (times.photo) {
+        cachedModalPhotos = [times.photo];
+      } else {
+        cachedModalPhotos = [];
+      }
 
       var custNameEl = document.getElementById('memoModalCustomerName');
       var addrEl = document.getElementById('memoModalAddress');
@@ -4974,9 +5006,10 @@
       var pastArea = document.getElementById('memoModalPastInfoArea');
       var pastText = document.getElementById('memoModalPastIssueText');
       var pastAuthor = document.getElementById('memoModalPastAuthorBadge');
-      if (pastArea && past && (past.issue || past.photo)) {
+      var pastPhotoCount = (past && past.photos && past.photos.length) || (past && past.photo ? 1 : 0);
+      if (pastArea && past && (past.issue || pastPhotoCount > 0)) {
         pastArea.classList.remove('hidden');
-        if (pastText) pastText.innerText = past.issue || (past.photo ? '[출고 사진 등록됨]' : '');
+        if (pastText) pastText.innerText = past.issue || (pastPhotoCount > 0 ? `[출고 사진 ${pastPhotoCount}장 등록됨]` : '');
         if (pastAuthor) pastAuthor.innerText = (past.driver_name ? past.driver_name + ' 기사 · ' : '') + (past.delivery_date || '');
       } else if (pastArea) {
         pastArea.classList.add('hidden');
@@ -4995,7 +5028,7 @@
 
     function closeMobileMemoModal() {
       activeModalMemoIdx = null;
-      cachedModalPhotoBase64 = '';
+      cachedModalPhotos = [];
       var modal = document.getElementById('mobileMemoModal');
       if (modal) modal.classList.add('hidden');
     }
@@ -5012,13 +5045,32 @@
       textarea.focus();
     }
 
-    function openMobileCardMemoPhoto(idx) {
+    function openMobileMemoPhotoInViewer(photoIdx) {
+      if (!Array.isArray(cachedModalPhotos) || cachedModalPhotos.length === 0) return;
+      var list = cachedModalPhotos.map(function(src, i) {
+        return {
+          src: src,
+          title: '현장 첨부 사진 #' + (i + 1) + ' / ' + cachedModalPhotos.length
+        };
+      });
+      var targetIdx = (typeof photoIdx === 'number' && photoIdx >= 0 && photoIdx < list.length) ? photoIdx : 0;
+      openMobilePhotoModal(list[targetIdx].src, list[targetIdx].title, list, targetIdx);
+    }
+
+    function openMobileCardMemoPhoto(idx, photoIdx) {
       if (!driverRecords || !driverRecords[idx]) return;
       var r = driverRecords[idx];
       var times = getStopTimes(r);
-      if (times && times.photo) {
-        openMobilePhotoModal(times.photo, (r.customer_name || '현장') + ' 특이사항 사진');
-      }
+      var photos = (Array.isArray(times.photos) && times.photos.length > 0) ? times.photos : (times.photo ? [times.photo] : []);
+      if (photos.length === 0) return;
+      var list = photos.map(function(src, i) {
+        return {
+          src: src,
+          title: (r.customer_name || '현장') + ' 특이사항 사진 #' + (i + 1) + ' / ' + photos.length
+        };
+      });
+      var targetIdx = (typeof photoIdx === 'number' && photoIdx >= 0 && photoIdx < list.length) ? photoIdx : 0;
+      openMobilePhotoModal(list[targetIdx].src, list[targetIdx].title, list, targetIdx);
     }
 
     function updateModalPhotoUI() {
@@ -5026,35 +5078,69 @@
       var statusEl = document.getElementById('memoModalPhotoStatus');
       if (!container) return;
 
-      if (cachedModalPhotoBase64) {
+      var count = cachedModalPhotos.length;
+
+      if (count > 0) {
         if (statusEl) {
-          statusEl.innerText = '첨부됨 (1장)';
-          statusEl.className = 'text-[10.5px] text-emerald-600 font-bold';
+          if (count >= MAX_MEMO_PHOTOS) {
+            statusEl.innerText = `최대 첨부 완료 (${count}/${MAX_MEMO_PHOTOS}장)`;
+            statusEl.className = 'text-[10px] text-indigo-700 font-black bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200';
+          } else {
+            statusEl.innerText = `첨부됨 (${count} / ${MAX_MEMO_PHOTOS}장)`;
+            statusEl.className = 'text-[10.5px] text-emerald-600 font-bold';
+          }
         }
-        container.innerHTML = `
-          <div class="flex items-center gap-3">
-            <div class="relative inline-block shrink-0">
-              <img src="${cachedModalPhotoBase64}" onclick="openMobilePhotoModal(this.src, '현장 사진')" class="w-14 h-14 object-cover rounded-xl border-2 border-indigo-500 shadow-xs cursor-pointer hover:opacity-90" title="터치 시 확대">
-              <button type="button" onclick="removeModalPhoto()" class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white rounded-full flex items-center justify-center text-[10px] shadow" title="사진 삭제">
+
+        var thumbnailsHtml = cachedModalPhotos.map(function(pUrl, pIdx) {
+          return `
+            <div class="relative shrink-0 group">
+              <img src="${pUrl}" onclick="openMobileMemoPhotoInViewer(${pIdx})" class="w-16 h-16 object-cover rounded-xl border-2 border-indigo-500 shadow-xs cursor-pointer hover:opacity-90 active:scale-95 transition" title="터치 시 확대 보기">
+              <span class="absolute top-1 left-1 bg-black/75 text-white text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-2xs">${pIdx + 1}</span>
+              <button type="button" onclick="event.stopPropagation(); removeModalPhoto(${pIdx})" class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 active:bg-rose-700 text-white rounded-full flex items-center justify-center text-[10px] shadow" title="사진 삭제">
                 <i class="fa-solid fa-xmark"></i>
               </button>
             </div>
-            <div class="flex-1 space-y-1 min-w-0">
-              <span class="text-[11px] text-slate-600 font-medium block truncate">터치 시 사진을 크게 확대하여 봅니다.</span>
-              <div class="flex items-center gap-1.5">
-                <button type="button" onclick="document.getElementById('memoModalCameraInput').click()" class="py-1 px-2.5 bg-white hover:bg-indigo-50 text-slate-700 text-[10.5px] font-bold rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1 transition active:scale-95">
-                  <i class="fa-solid fa-camera text-indigo-600"></i> 재촬영
-                </button>
-                <button type="button" onclick="document.getElementById('memoModalGalleryInput').click()" class="py-1 px-2.5 bg-white hover:bg-emerald-50 text-slate-700 text-[10.5px] font-bold rounded-lg border border-slate-300 shadow-2xs flex items-center gap-1 transition active:scale-95">
-                  <i class="fa-solid fa-images text-emerald-600"></i> 앨범 재선택
-                </button>
-              </div>
+          `;
+        }).join('');
+
+        var actionButtonsHtml = '';
+        if (count < MAX_MEMO_PHOTOS) {
+          var remaining = MAX_MEMO_PHOTOS - count;
+          actionButtonsHtml = `
+            <div class="grid grid-cols-2 gap-2 pt-1">
+              <button type="button" onclick="document.getElementById('memoModalCameraInput').click()" class="py-2 px-2 bg-white hover:bg-indigo-50 text-slate-700 hover:text-indigo-700 text-[11px] font-bold rounded-xl border border-slate-300 shadow-2xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                <i class="fa-solid fa-camera text-indigo-600"></i> 추가 촬영
+              </button>
+              <button type="button" onclick="document.getElementById('memoModalGalleryInput').click()" class="py-2 px-2 bg-white hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 text-[11px] font-bold rounded-xl border border-slate-300 shadow-2xs flex items-center justify-center gap-1.5 transition active:scale-95">
+                <i class="fa-solid fa-images text-emerald-600"></i> 앨범 추가 (${remaining}장 가능)
+              </button>
             </div>
+          `;
+        } else {
+          actionButtonsHtml = `
+            <div class="py-2 px-3 bg-indigo-50/80 border border-indigo-200 rounded-xl text-center">
+              <span class="text-[11px] text-indigo-800 font-bold flex items-center justify-center gap-1.5">
+                <i class="fa-solid fa-circle-check text-indigo-600"></i> 최대 5장까지 모두 첨부되었습니다.
+              </span>
+            </div>
+          `;
+        }
+
+        container.innerHTML = `
+          <div class="space-y-2">
+            <div class="flex items-center gap-2 overflow-x-auto pb-1 pt-1">
+              ${thumbnailsHtml}
+            </div>
+            <div class="flex items-center justify-between text-[10px] text-slate-500">
+              <span>사진 터치 시 전체화면 확대 · ✕ 터치 시 삭제</span>
+              <span class="font-bold text-indigo-600">${count} / ${MAX_MEMO_PHOTOS}</span>
+            </div>
+            ${actionButtonsHtml}
           </div>
         `;
       } else {
         if (statusEl) {
-          statusEl.innerText = '사진 없음';
+          statusEl.innerText = `사진 없음 (최대 ${MAX_MEMO_PHOTOS}장 가능)`;
           statusEl.className = 'text-[10px] text-slate-400 font-medium';
         }
         container.innerHTML = `
@@ -5073,15 +5159,32 @@
     }
 
     async function handleModalPhotoUpload(event) {
-      var file = event.target.files && event.target.files[0];
-      if (!file) return;
+      var files = event.target.files;
+      if (!files || files.length === 0) return;
 
-      showToast('⏳ 고화질 사진 최적화 중...');
+      var available = MAX_MEMO_PHOTOS - cachedModalPhotos.length;
+      if (available <= 0) {
+        showToast('⚠️ 현장 사진은 최대 5장까지만 첨부할 수 있습니다.');
+        event.target.value = '';
+        return;
+      }
+
+      var fileList = Array.from(files);
+      if (fileList.length > available) {
+        showToast(`⚠️ 최대 5장까지 가능하여 ${available}장만 추가됩니다.`);
+        fileList = fileList.slice(0, available);
+      }
+
+      showToast(`⏳ 고화질 사진 최적화 중 (${fileList.length}장)...`);
       try {
-        var base64Data = await compressImage(file, 1600, 0.82);
-        cachedModalPhotoBase64 = base64Data;
+        for (var i = 0; i < fileList.length; i++) {
+          var base64Data = await compressImage(fileList[i], 1600, 0.82);
+          if (cachedModalPhotos.length < MAX_MEMO_PHOTOS) {
+            cachedModalPhotos.push(base64Data);
+          }
+        }
         updateModalPhotoUI();
-        showToast('📷 사진이 첨부되었습니다. [저장 완료]를 눌러주세요.');
+        showToast(`📷 사진 ${fileList.length}장이 첨부되었습니다. [저장 완료]를 눌러주세요.`);
       } catch(err) {
         console.error('Photo compress error:', err);
         showToast('⚠️ 사진 첨부 중 오류가 발생했습니다.');
@@ -5089,8 +5192,12 @@
       event.target.value = '';
     }
 
-    function removeModalPhoto() {
-      cachedModalPhotoBase64 = '';
+    function removeModalPhoto(photoIdx) {
+      if (typeof photoIdx === 'number' && photoIdx >= 0 && photoIdx < cachedModalPhotos.length) {
+        cachedModalPhotos.splice(photoIdx, 1);
+      } else {
+        cachedModalPhotos.pop();
+      }
       updateModalPhotoUI();
       showToast('🗑️ 사진이 삭제되었습니다. [저장 완료]를 눌러주세요.');
     }
@@ -5110,7 +5217,8 @@
 
       var times = getStopTimes(r);
       times.issue = newIssue;
-      times.photo = cachedModalPhotoBase64;
+      times.photos = cachedModalPhotos.slice(0, MAX_MEMO_PHOTOS);
+      times.photo = times.photos.length > 0 ? times.photos[0] : '';
       times.issue_author = (currentUser && currentUser.id) ? currentUser.id : '기사';
       times.issueAuthor = times.issue_author;
       times.updated_at = new Date().toISOString();
@@ -5121,7 +5229,8 @@
       if (r.id) {
         pendingMobileSyncMemos[r.id] = {
           issue: newIssue,
-          photo: cachedModalPhotoBase64,
+          photos: times.photos,
+          photo: times.photo,
           author: times.issue_author,
           time: Date.now()
         };
