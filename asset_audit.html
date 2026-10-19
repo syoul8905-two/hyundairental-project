@@ -548,10 +548,48 @@
         </div>
       </div>
 
+      <!-- 모델군별 상태 대사 요약표 (사용자 지정 양식) -->
+      <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-3">
+        <div class="flex items-center justify-between">
+          <h4 class="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+            <i data-lucide="table-2" class="w-4 h-4 text-indigo-600"></i>
+            <span>모델군별 자산 상태 대사표</span>
+          </h4>
+          <span class="text-[11px] text-slate-500 font-mono">단위: 건</span>
+        </div>
+        <div class="overflow-x-auto rounded-lg border border-slate-300 shadow-sm">
+          <table class="w-full text-xs text-center border-collapse">
+            <thead>
+              <tr class="bg-slate-700 text-white font-bold text-[11px]">
+                <th rowspan="2" class="border border-slate-600 px-3 py-2 w-16">구분</th>
+                <th rowspan="2" class="border border-slate-600 px-3 py-2 w-24">모델군</th>
+                <th colspan="4" class="border border-slate-600 px-3 py-1.5">상태</th>
+              </tr>
+              <tr class="bg-slate-700 text-white font-bold text-[11px]">
+                <th class="border border-slate-600 px-3 py-1.5 w-24">임대중</th>
+                <th class="border border-slate-600 px-3 py-1.5 w-24">임대가능</th>
+                <th class="border border-slate-600 px-3 py-1.5 w-20">수리대기</th>
+                <th class="border border-slate-600 px-3 py-1.5 w-32 bg-slate-800 text-emerald-300">소계 (임대중 제외)</th>
+              </tr>
+            </thead>
+            <tbody id="modelGroupTableBody" class="divide-y divide-slate-200 bg-white">
+              <!-- JS 동적 렌더링 -->
+            </tbody>
+            <tfoot id="modelGroupTableFoot" class="bg-amber-100/90 font-bold border-t-2 border-slate-400 text-slate-900">
+              <!-- JS 동적 렌더링 -->
+            </tfoot>
+          </table>
+        </div>
+        <p class="text-[11px] text-slate-500 text-right">
+          * 소계 (임대중 제외) = <strong>임대가능 + 수리대기</strong> (실제 창고 현장 실사 대상 수량)
+        </p>
+      </div>
+
       <!-- 현황 텍스트 미리보기 -->
       <div class="bg-white rounded-xl p-4 shadow-sm border border-slate-200 space-y-2">
         <h4 class="text-xs font-bold text-slate-700">보고서 텍스트 미리보기</h4>
         <pre id="txtReportPreview" class="p-3 bg-slate-900 text-emerald-400 rounded-lg text-[11px] font-mono whitespace-pre-wrap max-h-48 overflow-y-auto"></pre>
+      </div>
     </section>
 
     <!-- ==================== 탭 5: 신규 입고 시리얼 채번 ==================== -->
@@ -2047,6 +2085,46 @@
       }
     }
 
+    // [모델군 자동 분류 엔진] 중분류 및 제품명 기준
+    function getAssetModelGroup(asset) {
+      const mid = (asset.category || '').trim();
+      const prod = (asset.productName || '').trim();
+      if (prod.includes('공기청정기')) return '공기청정기';
+      if (mid === 'D/T') return '데스크탑';
+      if (mid === 'M/T') return '모니터';
+      if (mid === 'N/T') return '노트북';
+      if (mid === 'TABLET') return '테블릿';
+      if (mid === '복합기') return '복합기';
+      if (mid === 'P/T') return '프린터';
+      if (mid === '부품') return '부품';
+      return '기타';
+    }
+
+    // [모델군별 상태 대사 집계 엔진]
+    function computeModelGroupStats() {
+      const modelGroups = ['데스크탑', '모니터', '노트북', '테블릿', '복합기', '프린터', '기타', '부품', '공기청정기'];
+      const stats = {};
+      modelGroups.forEach(g => {
+        stats[g] = { rented: 0, avail: 0, repair: 0, subtotal: 0 };
+      });
+
+      masterAssets.forEach(asset => {
+        const grp = getAssetModelGroup(asset);
+        const st = asset.status;
+        if (st === '임대중') {
+          stats[grp].rented++;
+        } else if (st === '임대가능') {
+          stats[grp].avail++;
+          stats[grp].subtotal++;
+        } else if (st === '수리대기') {
+          stats[grp].repair++;
+          stats[grp].subtotal++;
+        }
+      });
+
+      return { modelGroups, stats };
+    }
+
     function exportToExcel() {
       try {
         if (typeof XLSX === 'undefined') {
@@ -2122,25 +2200,72 @@
         const extraCount = extraAssets.size;
         const pct = targetCount > 0 ? Math.round((scannedTargetCount / targetCount) * 100) : 0;
 
+        // 모델군별 피벗 테이블 집계
+        const { modelGroups, stats } = computeModelGroupStats();
+
+        // Sheet 1: 실사종합요약 (사용자 요청 모델군별 대사표 양식)
         const summaryData = [
-          ['현대렌탈 자산 실사 종합 보고서'],
-          ['작성일시', now.toLocaleString()],
-          ['기준 마스터 파일', currentFileName || '클라우드_동기화_데이터'],
-          [],
-          ['■ 현장 실사 결과 (실사 체크 대상: 임대가능 + 수리대기)', '수량(건)', '장부가액 합계(원)', '실사율(%)'],
-          ['현장 실사 대상 합계', targetCount, targetBookVal, '100%'],
-          [' ├─ 임대가능 자산', targetAvailCount, '-', '-'],
-          [' └─ 수리대기 자산', targetRepairCount, '-', '-'],
-          ['실사 완료 자산 (창고 현장 확인)', scannedTargetCount, scannedTargetBookVal, `${pct}%`],
-          ['미실사 누락 자산 (창고 집중 수색 대상)', missingTargetCount, missingTargetBookVal, `${100 - pct}%`],
-          [],
-          ['■ 실사 제외 자산 (참고 대장)', '수량(건)', '장부가액 합계(원)', '비고'],
-          ['고객사 임대중 자산', rentedCount, rentedBookVal, '외부 렌탈 운용 중 (실사 제외)'],
-          ['사내사용 / 출고완료 / 기타', otherCount, otherBookVal, '사내 비품 및 출고 완료'],
-          ['마스터 대장 전체 합계', totalCount, totalBookVal, '전체 자산'],
-          ['미등록 초과 스캔 자산', extraCount, 0, '대장 외 자산']
+          ['구분', '모델군', '상태', '', '', ''],
+          ['', '', '임대중', '임대가능', '수리대기', '소계 (임대중 제외)']
         ];
+
+        let totR = 0, totA = 0, totRep = 0, totSub = 0;
+        modelGroups.forEach((grp, idx) => {
+          const s = stats[grp];
+          totR += s.rented;
+          totA += s.avail;
+          totRep += s.repair;
+          totSub += s.subtotal;
+          summaryData.push([
+            idx === 0 ? '자산' : '',
+            grp,
+            s.rented > 0 ? s.rented : '-',
+            s.avail > 0 ? s.avail : '-',
+            s.repair > 0 ? s.repair : '-',
+            s.subtotal > 0 ? s.subtotal : '-'
+          ]);
+        });
+
+        // 자산 소계 행
+        summaryData.push([
+          '자산 소계',
+          '',
+          totR,
+          totA,
+          totRep,
+          totSub
+        ]);
+
+        summaryData.push([]);
+        summaryData.push(['■ 현장 실사 진행 현황 (현장 실사 대상: 임대가능 + 수리대기)', '수량(건)', '장부가액 합계(원)', '실사율(%)']);
+        summaryData.push(['현장 실사 대상 합계', targetCount, targetBookVal, '100%']);
+        summaryData.push([' ├─ 임대가능 자산', targetAvailCount, '-', '-']);
+        summaryData.push([' └─ 수리대기 자산', targetRepairCount, '-', '-']);
+        summaryData.push(['실사 완료 자산 (창고 현장 확인)', scannedTargetCount, scannedTargetBookVal, `${pct}%`]);
+        summaryData.push(['미실사 누락 자산 (창고 집중 수색 대상)', missingTargetCount, missingTargetBookVal, `${100 - pct}%`]);
+        summaryData.push([]);
+        summaryData.push(['■ 실사 제외 자산 (참고 대장)', '수량(건)', '장부가액 합계(원)', '비고']);
+        summaryData.push(['고객사 임대중 자산', rentedCount, rentedBookVal, '외부 렌탈 운용 중 (실사 제외)']);
+        summaryData.push(['사내사용 / 출고완료 / 기타', otherCount, otherBookVal, '사내 비품 및 출고 완료']);
+        summaryData.push(['마스터 대장 전체 합계', totalCount, totalBookVal, '전체 자산']);
+        summaryData.push(['미등록 초과 스캔 자산', extraCount, 0, '대장 외 자산']);
+
         const wsSummary = XLSX.utils.aoa_to_sheet(summaryData);
+        wsSummary['!merges'] = [
+          { s: { r: 0, c: 0 }, e: { r: 1, c: 0 } }, // A1:A2 구분
+          { s: { r: 0, c: 1 }, e: { r: 1, c: 1 } }, // B1:B2 모델군
+          { s: { r: 0, c: 2 }, e: { r: 0, c: 5 } }, // C1:F1 상태
+          { s: { r: 2, c: 0 }, e: { r: 10, c: 0 } }, // A3:A11 자산
+          { s: { r: 11, c: 0 }, e: { r: 11, c: 1 } }  // A12:B12 자산 소계
+        ];
+        wsSummary['!cols'] = [
+          { wch: 10 },
+          { wch: 14 },
+          { wch: 14 },
+          { wch: 14 },
+          { wch: 14 },
+          { wch: 20 }
+        ];
         XLSX.utils.book_append_sheet(wb, wsSummary, '실사종합요약');
 
         // Sheet 2: 현장 미실사 누락 자산 (임대가능 + 수리대기 미스캔 건 - 창고 집중 수색용)
@@ -2304,6 +2429,56 @@
     }
 
     function renderReportPreview(targetCount, scannedTargetCount, missingTargetCount, extraCount, targetVal, missingVal, pct, totalCount, rentedCount, otherCount) {
+      // 1. 모델군별 상태 대사표 렌더링
+      try {
+        const { modelGroups, stats } = computeModelGroupStats();
+        const tbody = document.getElementById('modelGroupTableBody');
+        const tfoot = document.getElementById('modelGroupTableFoot');
+        if (tbody) {
+          let rowsHtml = '';
+          let totR = 0, totA = 0, totRep = 0, totSub = 0;
+          modelGroups.forEach((grp, idx) => {
+            const s = stats[grp];
+            totR += s.rented;
+            totA += s.avail;
+            totRep += s.repair;
+            totSub += s.subtotal;
+
+            const rStr = s.rented > 0 ? s.rented.toLocaleString() : '-';
+            const aStr = s.avail > 0 ? s.avail.toLocaleString() : '-';
+            const repStr = s.repair > 0 ? s.repair.toLocaleString() : '-';
+            const subStr = s.subtotal > 0 ? s.subtotal.toLocaleString() : '-';
+
+            rowsHtml += `
+              <tr class="hover:bg-slate-50 transition text-slate-800">
+                ${idx === 0 ? `<td rowspan="${modelGroups.length}" class="border border-slate-300 font-bold bg-slate-50 text-slate-700 align-middle">자산</td>` : ''}
+                <td class="border border-slate-300 px-3 py-2 font-medium text-slate-800 text-left bg-white">${grp}</td>
+                <td class="border border-slate-300 px-3 py-2 text-right text-slate-600 font-mono">${rStr}</td>
+                <td class="border border-slate-300 px-3 py-2 text-right text-blue-600 font-bold font-mono">${aStr}</td>
+                <td class="border border-slate-300 px-3 py-2 text-right text-amber-600 font-bold font-mono">${repStr}</td>
+                <td class="border border-slate-300 px-3 py-2 text-right font-bold text-emerald-700 bg-emerald-50/50 font-mono">${subStr}</td>
+              </tr>
+            `;
+          });
+          tbody.innerHTML = rowsHtml;
+
+          if (tfoot) {
+            tfoot.innerHTML = `
+              <tr>
+                <td colspan="2" class="border border-slate-400 px-3 py-2.5 text-center font-bold text-slate-900 bg-amber-100/90">자산 소계</td>
+                <td class="border border-slate-400 px-3 py-2.5 text-right font-bold font-mono text-slate-900 bg-amber-100/90">${totR.toLocaleString()}</td>
+                <td class="border border-slate-400 px-3 py-2.5 text-right font-bold font-mono text-blue-800 bg-amber-100/90">${totA.toLocaleString()}</td>
+                <td class="border border-slate-400 px-3 py-2.5 text-right font-bold font-mono text-amber-800 bg-amber-100/90">${totRep.toLocaleString()}</td>
+                <td class="border border-slate-400 px-3 py-2.5 text-right font-bold font-mono text-emerald-800 bg-amber-200/80">${totSub.toLocaleString()}</td>
+              </tr>
+            `;
+          }
+        }
+      } catch (err) {
+        console.warn('renderReportPreview table error:', err);
+      }
+
+      // 2. 텍스트 요약 렌더링
       const text = `[현대렌탈 자산 실사 현황 보고]
 일시: ${new Date().toLocaleString()}
 마스터 파일: ${currentFileName || '미지정'}
