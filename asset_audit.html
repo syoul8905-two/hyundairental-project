@@ -526,7 +526,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
           <button id="btnExportExcel" class="flex items-center justify-center gap-2 px-4 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-bold text-xs shadow-sm transition">
             <i data-lucide="file-spreadsheet" class="w-4 h-4"></i>
-            <span>5개 시트 엑셀(.xlsx) 다운로드</span>
+            <span>6개 시트 엑셀(.xlsx) 다운로드</span>
           </button>
 
           <button id="btnCopyReportText" class="flex items-center justify-center gap-2 px-4 py-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs shadow-sm transition">
@@ -536,13 +536,14 @@
         </div>
 
         <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 text-[11px] text-slate-600 space-y-1">
-          <p class="font-bold text-slate-700">📑 엑셀 시트 구성 안내 (5개 시트 완벽 분리):</p>
+          <p class="font-bold text-slate-700">📑 엑셀 시트 구성 안내 (6개 시트 완벽 분리):</p>
           <ul class="list-disc pl-4 space-y-0.5 text-slate-500">
             <li><strong>Sheet 1: [실사종합요약]</strong> - 현장 실사 대상(임대가능+수리대기) vs 고객사 임대중 종합 대사표</li>
             <li><strong>Sheet 2: [창고미실사_수색목록]</strong> - 현장 실사 대상 중 창고 미확인 누락 자산 수색 리스트</li>
             <li><strong>Sheet 3: [실사완료자산]</strong> - 바코드로 실물 확인 완료된 자산 목록 (스캔 일시/횟수 포함)</li>
             <li><strong>Sheet 4: [고객사임대중_제외자산]</strong> - 고객사 임대중 외부 자산 증빙 분리 시트 (실사 제외)</li>
             <li><strong>Sheet 5: [미등록초과자산]</strong> - 마스터 대장에 없는데 현장에서 실물로 스캔된 유령 자산</li>
+            <li><strong>Sheet 6: [원본데이터_(파일명)]</strong> - 업로드했던 원본 대장 CSV 전체 원본 데이터 보존</li>
           </ul>
         </div>
       </div>
@@ -1159,11 +1160,15 @@
         scannedAssets.clear();
         extraAssets.clear();
       }
-      rawCsvData = rows;
-      currentFileName = filename;
 
       // 1순위: 초경량 컴팩트 포맷 확인 ('__COMPACT_V2__')
       const isCompact = rows.length > 0 && Array.isArray(rows[0]) && rows[0][0] === '__COMPACT_V2__';
+
+      // 만약 기존에 30컬럼 전체 원본 CSV(rawCsvData)가 있고, 지금 들어오는 것이 축약형(__COMPACT_V2__)이라면 원본 rawCsvData는 덮어쓰지 않고 온전히 보존
+      if (!isCompact || !rawCsvData || rawCsvData.length < 2 || rawCsvData[0][0] === '__COMPACT_V2__') {
+        rawCsvData = rows;
+      }
+      currentFileName = filename;
 
       let loadedCount = 0;
 
@@ -2247,6 +2252,47 @@
         });
         const wsExtra = XLSX.utils.aoa_to_sheet(extraData);
         XLSX.utils.book_append_sheet(wb, wsExtra, '미등록초과자산');
+
+        // Sheet 6: 원본 CSV 마스터 데이터 (사용자 요청: 마지막 시트에 원본데이터_파일명 추가)
+        let rawExportRows = [];
+        if (rawCsvData && rawCsvData.length > 1 && rawCsvData[0][0] !== '__COMPACT_V2__') {
+          rawExportRows = rawCsvData;
+        } else if (masterAssets && masterAssets.size > 0) {
+          // 폴백: masterAssets로부터 원본 필드 재구성
+          rawExportRows = [
+            ['', '대분류', '중분류', '자산번호', '자산구분', '자산상태', '제품코드', '제품명', '모델명', '제조사', '관리번호', '시리얼번호', '수량', '단위', '취득가액', '최근입고일', '최근출고일', '최근고객번호', '최근 고객명', '부가세구분', '월 렌탈일수', '총 렌탈일수', '장부가', '폐기일자', '폐기구분', '선반번호', '비고', '신품/중고', '출고처', '옵션']
+          ];
+          masterAssets.forEach(a => {
+            rawExportRows.push([
+              '', a.mainCategory || '', a.category || '', a.assetNo || '', a.assetType || '', a.status || '',
+              '', a.productName || '', a.modelName || '', a.manufacturer || '', a.mgmtNo || '', a.serialNo || '',
+              1, '', Number(a.acqPrice) || 0, a.lastInboundDate || '', a.lastOutboundDate || '', '',
+              a.customerName || '', '', '', '', Number(a.bookValue) || 0, '', '', a.shelfNo || '', '', '', '', ''
+            ]);
+          });
+        }
+
+        if (rawExportRows && rawExportRows.length > 0) {
+          const wsRaw = XLSX.utils.aoa_to_sheet(rawExportRows);
+          let baseName = (currentFileName || '자산목록.csv').trim();
+          if (baseName.toLowerCase().endsWith('.csv')) {
+            baseName = baseName.slice(0, -4);
+          } else if (baseName.toLowerCase().endsWith('.xlsx')) {
+            baseName = baseName.slice(0, -5);
+          }
+          // 엑셀 금지 문자([], :, /, \, ?, *) 안전 치환 및 31자 규격 제한
+          const safeName = baseName
+            .replace(/\[/g, '(')
+            .replace(/\]/g, ')')
+            .replace(/:/g, '-')
+            .replace(/[\\/?*]/g, '_');
+
+          let rawSheetName = `원본데이터_${safeName}`;
+          if (rawSheetName.length > 31) {
+            rawSheetName = rawSheetName.slice(0, 31);
+          }
+          XLSX.utils.book_append_sheet(wb, wsRaw, rawSheetName);
+        }
 
         // 다운로드 실행 (안전 Blob 엔진)
         const outFilename = `자산실사보고서_${nowStr}.xlsx`;
