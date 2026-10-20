@@ -4053,14 +4053,16 @@
           var cNo = (r.contract_no || '').trim();
           var cName = (r.customer_name || '').trim();
           if (!isPlaceholderContractNo(cNo)) {
-            if (!contractList.includes(cNo)) contractList.push(cNo);
+            if (!pastDeliveryNotesMap.has(cNo) && !contractList.includes(cNo)) contractList.push(cNo);
           } else if (cName) {
-            if (!placeholderCustList.includes(cName)) placeholderCustList.push(cName);
+            if (!pastDeliveryNotesByCustomerMap.has(cName) && !placeholderCustList.includes(cName)) placeholderCustList.push(cName);
           }
         });
 
-        pastDeliveryNotesMap.clear();
-        pastDeliveryNotesByCustomerMap.clear();
+        if (contractList.length === 0 && placeholderCustList.length === 0) {
+          // 이미 모든 계약/고객사의 과거 이력이 메모리에 캐시되어 있으므로 불필요한 Egress 전송 차단
+          return;
+        }
 
         var fetchPromises = [];
 
@@ -4172,8 +4174,12 @@
       try {
         if (!supabaseClient) throw new Error('Supabase client uninitialized');
 
-        await syncDriverOriginsFromCloud();
-        await syncMobileVehiclesFromCloud();
+        var nowTs = Date.now();
+        if (!window._lastMobileAuxSync || (nowTs - window._lastMobileAuxSync > 300000)) {
+          await syncDriverOriginsFromCloud();
+          await syncMobileVehiclesFromCloud();
+          window._lastMobileAuxSync = nowTs;
+        }
 
         var query = supabaseClient
           .from('delivery_schedules')
@@ -6540,7 +6546,7 @@
             loadMobileData(false);
           }
         }
-      }, 12000);
+      }, 25000);
     }
 
     // 모바일 브라우저 백그라운드 -> 포그라운드 복귀 시 즉시 최신 데이터 갱신 (입력 중에는 스킵하여 타이핑 소실 방어)

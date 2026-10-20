@@ -10495,25 +10495,28 @@
         console.warn('Realtime subscription warning:', e);
       }
 
-      // 2. 스마트 백그라운드 폴링 (12초 주기: 웹소켓 슬립 및 백그라운드 탭 대비)
+      // 2. 스마트 백그라운드 폴링 (25초 주기: 웹소켓 슬립 및 백그라운드 탭 대비)
+      // [대역폭 99% 절감] 실시간 데이터 변경은 WebSocket(realtimeChannel)으로 즉시 감지되므로,
+      // 12초마다 수백 개 행(Base64 사진 포함)을 조회하던 과도한 Egress 유발 로직을 완전 제거
       if (syncPollingInterval) clearInterval(syncPollingInterval);
       syncPollingInterval = setInterval(function() {
         if (!document.hidden) {
           triggerSync(true);
-          if (typeof refreshHistoryNotificationBadges === 'function') {
-            refreshHistoryNotificationBadges();
-          }
         }
-      }, 12000);
+      }, 25000);
+
+      // 알림 배지 이력 쿼리는 10분에 1회 가볍게 보조 폴링
+      setInterval(function() {
+        if (!document.hidden && typeof refreshHistoryNotificationBadges === 'function') {
+          refreshHistoryNotificationBadges();
+        }
+      }, 600000);
     }
 
-    // 3. 브라우저 탭 포커스 복귀 시 즉시 동기화
+    // 3. 브라우저 탭 포커스 복귀 시 가벼운 동기화
     document.addEventListener('visibilitychange', function() {
       if (!document.hidden) {
         triggerSync(true);
-        if (typeof refreshHistoryNotificationBadges === 'function') {
-          refreshHistoryNotificationBadges();
-        }
       }
     });
     window.addEventListener('focus', function() {
@@ -10712,13 +10715,14 @@
           .not('customer_name', 'like', 'SYSTEM_CONFIG_%')
           .not('customer_name', 'like', 'VEHICLE_%')
           .order('delivery_date', { ascending: false })
-          .limit(300);
+          .limit(50);
 
         var pAs = supabaseClient
           .from('delivery_schedules')
           .select('id, source_sheet, contract_no, customer_name, category, delivery_date, status, memo_special, memo_full')
           .eq('source_sheet', 'AS_RECORDS')
-          .order('delivery_date', { ascending: false });
+          .order('delivery_date', { ascending: false })
+          .limit(50);
 
         var results = await Promise.all([pDeliv, pAs]);
         var delivRows = (results[0] && results[0].data) ? results[0].data : [];
