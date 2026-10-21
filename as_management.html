@@ -453,6 +453,33 @@
           </div>
         </div>
 
+        <!-- ======================================== -->
+        <!-- [ATTACHMENTS SECTION] 견적서 및 증빙 첨부파일 (최대 5개, 파일당 5MB) -->
+        <!-- ======================================== -->
+        <div class="space-y-1.5 p-3 bg-slate-50/90 rounded-2xl border border-slate-200">
+          <div class="flex items-center justify-between">
+            <label class="text-[11px] font-black text-slate-700 flex items-center gap-1.5">
+              <i class="fa-solid fa-paperclip text-rose-500"></i>
+              <span>견적서 및 첨부파일</span>
+              <span class="text-[10px] font-bold text-slate-400 font-mono">(최대 5개, 5MB/개)</span>
+            </label>
+            <span id="asAttachmentCountBadge" class="text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-mono">0 / 5</span>
+          </div>
+
+          <!-- Hidden File Input -->
+          <input type="file" id="asFileInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.hwp,.hwpx,.zip,.jpg,.jpeg,.png,.webp,.gif,image/*,application/pdf" class="hidden" onchange="handleAsFileUpload(event)">
+
+          <!-- Drag & Drop / Upload Trigger Area -->
+          <div id="asFileDropZone" onclick="document.getElementById('asFileInput').click()" class="border-2 border-dashed border-slate-300 hover:border-rose-400 bg-white hover:bg-rose-50/40 rounded-xl p-2.5 text-center cursor-pointer transition flex items-center justify-center gap-2 group shadow-2xs">
+            <i class="fa-solid fa-cloud-arrow-up text-base text-slate-400 group-hover:text-rose-500 transition"></i>
+            <span class="text-xs font-bold text-slate-700 group-hover:text-rose-600 transition">+ 견적서 / 증빙 첨부파일 추가</span>
+            <span class="text-[10px] text-slate-400 font-medium">(클릭 또는 파일 끌어놓기)</span>
+          </div>
+
+          <!-- Attachment List Container -->
+          <div id="asAttachmentList" class="space-y-1.5 hidden pt-0.5"></div>
+        </div>
+
         <!-- Submit Button -->
         <button type="button" onclick="saveAsRecord()" class="w-full py-2.5 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-black rounded-xl transition flex items-center justify-center gap-2 shadow-md shadow-rose-600/20 text-xs">
           <i class="fa-solid fa-floppy-disk"></i>
@@ -671,6 +698,12 @@
     var currentStatusFilter = 'all';
     var currentPeriodFilter = 'all';
 
+    // Attachments State (최대 5개, 파일당 5MB, 건당 총합 10MB)
+    var currentAsAttachments = [];
+    var MAX_AS_ATTACHMENTS = 5;
+    var MAX_AS_FILE_SIZE_BYTES = 5 * 1024 * 1024;    // 5MB per file
+    var MAX_AS_TOTAL_SIZE_BYTES = 10 * 1024 * 1024;  // 10MB total per AS record
+
     // Init App
     window.addEventListener('DOMContentLoaded', function() {
       // Set today's date in form for both receipt and processed dates
@@ -688,6 +721,7 @@
       loadAsData(true);
       loadCustomerHandovers();
       loadDeliveryBackgroundData();
+    setupAsFileDropZone();
     });
 
     // Helper: When Status changes
@@ -1581,6 +1615,341 @@
       }
     }
 
+    // ==========================================
+    // Attachment Management & Blob Stream Engine
+    // ==========================================
+    function setupAsFileDropZone() {
+      var dropZone = document.getElementById('asFileDropZone');
+      if (!dropZone) return;
+
+      ['dragenter', 'dragover'].forEach(function(evtName) {
+        dropZone.addEventListener(evtName, function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropZone.classList.add('border-rose-500', 'bg-rose-50');
+        });
+      });
+
+      ['dragleave', 'drop'].forEach(function(evtName) {
+        dropZone.addEventListener(evtName, function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          dropZone.classList.remove('border-rose-500', 'bg-rose-50');
+        });
+      });
+
+      dropZone.addEventListener('drop', function(e) {
+        var dt = e.dataTransfer;
+        if (dt && dt.files && dt.files.length > 0) {
+          processAsFiles(dt.files);
+        }
+      });
+    }
+
+    function handleAsFileUpload(event) {
+      if (event && event.target && event.target.files) {
+        processAsFiles(event.target.files);
+      }
+    }
+
+    async function processAsFiles(fileList) {
+      if (!fileList || fileList.length === 0) return;
+      var files = Array.from(fileList);
+
+      if (currentAsAttachments.length + files.length > MAX_AS_ATTACHMENTS) {
+        Swal.fire({
+          icon: 'warning',
+          title: '첨부파일 개수 초과',
+          text: `첨부파일은 최대 ${MAX_AS_ATTACHMENTS}개까지 등록할 수 있습니다. (현재: ${currentAsAttachments.length}개 / 추가 시도: ${files.length}개)`
+        });
+        return;
+      }
+
+      var currentTotalBytes = currentAsAttachments.reduce(function(sum, att) { return sum + (att.size || 0); }, 0);
+
+      for (var i = 0; i < files.length; i++) {
+        var file = files[i];
+
+        // 1. Single file size check (5MB)
+        if (file.size > MAX_AS_FILE_SIZE_BYTES) {
+          Swal.fire({
+            icon: 'error',
+            title: '단일 파일 용량 초과',
+            html: `[<b>${file.name}</b>] 파일 용량이 5MB를 초과합니다.<br><span class="text-rose-600 font-bold text-xs">${formatBytes(file.size)}</span> (최대 5MB 허용)`
+          });
+          continue;
+        }
+
+        // 2. Total attachments size check (10MB)
+        if (currentTotalBytes + file.size > MAX_AS_TOTAL_SIZE_BYTES) {
+          Swal.fire({
+            icon: 'warning',
+            title: '총 첨부 용량 한도 초과',
+            html: `[<b>${file.name}</b>] 첨부 시 총 용량이 10MB를 초과합니다.<br>DB 보호 가드레일에 의해 첨부할 수 없습니다.`
+          });
+          continue;
+        }
+
+        try {
+          var attItem = null;
+          if (file.type && file.type.startsWith('image/')) {
+            // Auto compress image with Canvas (1400px, 80% JPEG)
+            attItem = await compressAsImage(file, 1400, 0.80);
+          } else {
+            // Read document as Base64 Data URL
+            attItem = await readFileAsDataUrl(file);
+          }
+
+          if (attItem) {
+            currentAsAttachments.push(attItem);
+            currentTotalBytes += (attItem.size || 0);
+          }
+        } catch (err) {
+          console.error('File read error:', err);
+          Swal.fire('파일 처리 오류', `[${file.name}] 파일을 읽는 중 오류가 발생했습니다.`, 'error');
+        }
+      }
+
+      var inp = document.getElementById('asFileInput');
+      if (inp) inp.value = '';
+
+      renderAsAttachmentsUI();
+    }
+
+    function compressAsImage(file, maxDimension, quality) {
+      return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onerror = reject;
+        reader.onload = function(e) {
+          var img = new Image();
+          img.onerror = function() {
+            resolve({
+              id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+              name: file.name,
+              size: file.size,
+              type: file.type || 'image/jpeg',
+              data: e.target.result,
+              created_at: new Date().toISOString()
+            });
+          };
+          img.onload = function() {
+            var w = img.width;
+            var h = img.height;
+            if (w > maxDimension || h > maxDimension) {
+              if (w > h) {
+                h = Math.round((h * maxDimension) / w);
+                w = maxDimension;
+              } else {
+                w = Math.round((w * maxDimension) / h);
+                h = maxDimension;
+              }
+            }
+            var canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            var ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+
+            var mime = (file.type === 'image/png') ? 'image/png' : 'image/jpeg';
+            var compressedDataUrl = canvas.toDataURL(mime, quality);
+
+            var head = compressedDataUrl.indexOf(',') + 1;
+            var base64Len = compressedDataUrl.length - head;
+            var byteSize = Math.round((base64Len * 3) / 4);
+
+            resolve({
+              id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+              name: file.name,
+              size: byteSize,
+              type: mime,
+              data: compressedDataUrl,
+              created_at: new Date().toISOString()
+            });
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function readFileAsDataUrl(file) {
+      return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onerror = reject;
+        reader.onload = function(e) {
+          resolve({
+            id: 'att_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
+            name: file.name,
+            size: file.size,
+            type: file.type || 'application/octet-stream',
+            data: e.target.result,
+            created_at: new Date().toISOString()
+          });
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function formatBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      var k = 1024;
+      var sizes = ['B', 'KB', 'MB', 'GB'];
+      var i = Math.floor(Math.log(bytes) / Math.log(k));
+      if (i < 0) i = 0;
+      return parseFloat((bytes / Math.pow(k, i)).toFixed(i === 0 ? 0 : 1)) + ' ' + sizes[i];
+    }
+
+    function getFileIconClass(mime, name) {
+      var ext = (name || '').split('.').pop().toLowerCase();
+      var m = (mime || '').toLowerCase();
+
+      if (m.indexOf('pdf') !== -1 || ext === 'pdf') {
+        return 'fa-solid fa-file-pdf text-rose-500';
+      }
+      if (m.indexOf('spreadsheet') !== -1 || m.indexOf('excel') !== -1 || ext === 'xlsx' || ext === 'xls' || ext === 'csv') {
+        return 'fa-solid fa-file-excel text-emerald-600';
+      }
+      if (m.indexOf('word') !== -1 || ext === 'docx' || ext === 'doc') {
+        return 'fa-solid fa-file-word text-blue-600';
+      }
+      if (ext === 'hwp' || ext === 'hwpx') {
+        return 'fa-solid fa-file-lines text-teal-600';
+      }
+      if (m.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp'].indexOf(ext) !== -1) {
+        return 'fa-solid fa-file-image text-indigo-500';
+      }
+      if (ext === 'zip' || ext === 'rar' || ext === '7z') {
+        return 'fa-solid fa-file-zipper text-amber-600';
+      }
+      return 'fa-solid fa-file text-slate-500';
+    }
+
+    function renderAsAttachmentsUI() {
+      var countBadge = document.getElementById('asAttachmentCountBadge');
+      var listContainer = document.getElementById('asAttachmentList');
+      if (!countBadge || !listContainer) return;
+
+      var count = currentAsAttachments.length;
+      countBadge.textContent = `${count} / ${MAX_AS_ATTACHMENTS}`;
+      countBadge.className = count > 0 
+        ? 'text-[10px] font-black px-1.5 py-0.5 rounded bg-rose-100 text-rose-700 border border-rose-200 font-mono' 
+        : 'text-[10px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 font-mono';
+
+      if (count === 0) {
+        listContainer.classList.add('hidden');
+        listContainer.innerHTML = '';
+        return;
+      }
+
+      listContainer.classList.remove('hidden');
+      var html = '';
+      currentAsAttachments.forEach(function(att, idx) {
+        var iconCls = getFileIconClass(att.type, att.name);
+        var sizeStr = formatBytes(att.size);
+        html += `
+          <div class="flex items-center justify-between p-2 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition shadow-2xs text-xs">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+              <i class="${iconCls} text-sm shrink-0"></i>
+              <span class="font-bold text-slate-800 truncate" title="${att.name}">${att.name}</span>
+              <span class="text-[10px] font-mono text-slate-400 shrink-0">(${sizeStr})</span>
+            </div>
+            <div class="flex items-center gap-1 shrink-0 ml-2">
+              <button type="button" onclick="downloadOrPreviewAsAttachment(${idx})" class="px-1.5 py-1 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="열람 또는 다운로드">
+                <i class="fa-solid fa-eye text-xs"></i>
+              </button>
+              <button type="button" onclick="removeAsAttachment(${idx})" class="px-1.5 py-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition" title="첨부 삭제">
+                <i class="fa-solid fa-trash-can text-xs"></i>
+              </button>
+            </div>
+          </div>
+        `;
+      });
+      listContainer.innerHTML = html;
+    }
+
+    function removeAsAttachment(idx) {
+      if (idx >= 0 && idx < currentAsAttachments.length) {
+        currentAsAttachments.splice(idx, 1);
+        renderAsAttachmentsUI();
+      }
+    }
+
+    function downloadOrPreviewAsAttachment(idx) {
+      var att = currentAsAttachments[idx];
+      if (!att) return;
+      openBlobAttachment(att.data, att.name, att.type);
+    }
+
+    function downloadOrPreviewAsRecordAttachment(recordId, attId) {
+      var r = asRecords.find(function(item) { return item.id == recordId; });
+      if (!r || !r.memo_special) return;
+      try {
+        var p = JSON.parse(r.memo_special);
+        if (!p.attachments || !Array.isArray(p.attachments)) return;
+        var att = p.attachments.find(function(a) { return a.id === attId; });
+        if (att) {
+          openBlobAttachment(att.data, att.name, att.type);
+        }
+      } catch (e) {
+        console.error('Error opening record attachment:', e);
+      }
+    }
+
+    function openBlobAttachment(dataUrl, fileName, mimeType) {
+      if (!dataUrl) {
+        Swal.fire('열람 불가', '첨부된 파일 데이터가 비어 있습니다.', 'warning');
+        return;
+      }
+
+      try {
+        var arr = dataUrl.split(',');
+        if (arr.length < 2) {
+          window.open(dataUrl, '_blank');
+          return;
+        }
+
+        var mimeMatch = arr[0].match(/:(.*?);/);
+        var mime = (mimeMatch && mimeMatch[1]) ? mimeMatch[1] : (mimeType || 'application/octet-stream');
+        var bstr = atob(arr[1]);
+        var n = bstr.length;
+        var u8arr = new Uint8Array(n);
+        while (n--) {
+          u8arr[n] = bstr.charCodeAt(n);
+        }
+        var blob = new Blob([u8arr], { type: mime });
+        var blobUrl = URL.createObjectURL(blob);
+
+        var isPdf = mime.indexOf('pdf') !== -1 || (fileName || '').toLowerCase().endsWith('.pdf');
+        var isImg = mime.startsWith('image/');
+
+        if (isPdf || isImg) {
+          var w = window.open(blobUrl, '_blank');
+          if (!w) {
+            var a = document.createElement('a');
+            a.href = blobUrl;
+            a.download = fileName || 'attachment';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+          }
+        } else {
+          var a = document.createElement('a');
+          a.href = blobUrl;
+          a.download = fileName || 'attachment';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+        }
+
+        setTimeout(function() {
+          URL.revokeObjectURL(blobUrl);
+        }, 60000);
+      } catch (err) {
+        console.error('Error opening blob attachment:', err);
+        Swal.fire('열람 오류', '파일을 여는 중 문제가 발생했습니다: ' + err.message, 'error');
+      }
+    }
+
     // Save or Update A/S Record
     async function saveAsRecord() {
       if (!supabaseClient) {
@@ -1659,7 +2028,8 @@
         contact: combinedContact,
         receipt_date: receiptDate,
         processed_date: processedDate,
-        processed_at: new Date().toISOString()
+        processed_at: new Date().toISOString(),
+        attachments: currentAsAttachments
       };
 
       var payload = {
@@ -1737,6 +2107,8 @@
       document.getElementById('inputProcessedDate').value = today;
       document.getElementById('inputStatus').value = '처리완료';
       selectCategory('원격지원');
+      currentAsAttachments = [];
+      renderAsAttachmentsUI();
 
       document.getElementById('formModeBadge').textContent = '신규 접수';
       document.getElementById('formModeBadge').className = 'px-2 py-0.5 rounded-lg text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-200';
@@ -1802,6 +2174,11 @@
           }
         });
       }
+
+      currentAsAttachments = (p.attachments && Array.isArray(p.attachments)) 
+        ? JSON.parse(JSON.stringify(p.attachments)) 
+        : [];
+      renderAsAttachmentsUI();
 
       selectCategory(r.category || '원격지원');
 
@@ -2061,6 +2438,24 @@
             <!-- Row 2.5: Replacement Mapping -->
             ${replacementBadgesHtml}
 
+            <!-- Row 2.7: Attached Quotes & Documents -->
+            ${(p.attachments && Array.isArray(p.attachments) && p.attachments.length > 0) ? `
+              <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span class="text-[10px] font-black text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 flex items-center gap-1 shrink-0">
+                  <i class="fa-solid fa-paperclip text-[9px]"></i> 견적서/첨부 ${p.attachments.length}건
+                </span>
+                ${p.attachments.map(function(att) {
+                  return `
+                    <button type="button" onclick="event.stopPropagation(); downloadOrPreviewAsRecordAttachment(${r.id}, '${att.id}')" class="inline-flex items-center gap-1 text-[10.5px] font-bold bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 px-2 py-0.5 rounded-md border border-slate-200 hover:border-rose-300 transition shadow-2xs group cursor-pointer" title="클릭하여 견적서/첨부파일 열람 및 다운로드">
+                      <i class="${getFileIconClass(att.type, att.name)} text-[10px]"></i>
+                      <span class="truncate max-w-[140px]">${att.name}</span>
+                      <span class="text-[9.5px] font-mono text-slate-400 group-hover:text-rose-600">(${formatBytes(att.size)})</span>
+                    </button>
+                  `;
+                }).join('')}
+              </div>
+            ` : ''}
+
             <!-- Row 3: Large Memo Preview & Actions -->
             <div class="p-2 bg-white rounded-xl border border-slate-200/80 text-[11px] text-slate-600 flex items-start justify-between gap-2">
               <div class="flex-1 cursor-pointer hover:text-slate-900 transition" onclick="openMemoDetailModal(${r.id})" title="클릭하여 상세 메모 전문 보기">
@@ -2269,6 +2664,22 @@
                   <div class="text-xs font-bold text-slate-900 flex items-center gap-1">
                     <span class="text-rose-700 font-black text-[10px]">[증상]</span> ${symptom || '-'}
                   </div>
+                  ${(p.attachments && Array.isArray(p.attachments) && p.attachments.length > 0) ? `
+                    <div class="flex items-center gap-1.5 flex-wrap pt-0.5">
+                      <span class="text-[10px] font-black text-rose-700 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-200 flex items-center gap-1 shrink-0">
+                        <i class="fa-solid fa-paperclip text-[9px]"></i> 견적서/증빙 ${p.attachments.length}건
+                      </span>
+                      ${p.attachments.map(function(att) {
+                        return `
+                          <button type="button" onclick="downloadOrPreviewAsRecordAttachment(${row.id}, '${att.id}')" class="inline-flex items-center gap-1 text-[10.5px] font-bold bg-white hover:bg-rose-50 text-slate-700 hover:text-rose-700 px-2 py-0.5 rounded-md border border-slate-200 hover:border-rose-300 transition shadow-2xs group cursor-pointer" title="클릭하여 견적서 열람 및 다운로드">
+                            <i class="${getFileIconClass(att.type, att.name)} text-[10px]"></i>
+                            <span class="truncate max-w-[130px]">${att.name}</span>
+                            <span class="text-[9.5px] font-mono text-slate-400 group-hover:text-rose-600">(${formatBytes(att.size)})</span>
+                          </button>
+                        `;
+                      }).join('')}
+                    </div>
+                  ` : ''}
                   ${(cat === '장비교체' && p.replacements && Array.isArray(p.replacements) && p.replacements.length > 0) ? `
                     <div class="p-1.5 bg-teal-50/80 rounded-xl border border-teal-200 text-[11px] text-teal-950 font-bold flex flex-wrap items-center gap-1.5 shadow-2xs">
                       <span class="text-teal-800 font-black text-[10px] bg-teal-100 px-1.5 py-0.5 rounded flex items-center gap-1 shrink-0">
