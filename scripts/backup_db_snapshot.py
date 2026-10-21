@@ -16,6 +16,20 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+def send_heartbeat_ping():
+    """Send a lightweight ping to prevent Supabase 7-day auto-pausing"""
+    url = f"{SUPABASE_URL}/rest/v1/delivery_schedules?select=id&limit=1"
+    req = urllib.request.Request(url, headers=HEADERS)
+    try:
+        t0 = datetime.datetime.now()
+        with urllib.request.urlopen(req) as resp:
+            elapsed = (datetime.datetime.now() - t0).total_seconds() * 1000
+            print(f"  ▶ [Heartbeat Ping] 성공! (응답시간: {elapsed:.1f}ms, 상태: {resp.status}) - 7일 잠자기(Sleep) 방지 완료")
+            return True
+    except Exception as e:
+        print(f"  ⚠️ [Heartbeat Ping] 실패: {e}")
+        return False
+
 def fetch_all_records():
     """Fetch all rows from delivery_schedules with pagination support"""
     all_rows = []
@@ -50,68 +64,37 @@ def backup(output_dir="c:/antigravity/배송스케줄관리/backups"):
     now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     file_path = os.path.join(output_dir, f"db_snapshot_{now_str}.json")
 
-    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Supabase 전체 데이터 백업 시작...")
+    print(f"[{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] Supabase 전체 데이터 백업 & 헬스체크 시작...")
+    
+    # 1. 7일 자동 잠자기(Auto-Pause) 방지 핑 전송
+    send_heartbeat_ping()
+    
+    # 2. 전체 레코드 수집 및 백업
     rows = fetch_all_records()
     print(f"  ▶ 총 수집 레코드: {len(rows):,}건")
 
-    # Group summary by source_sheet
     summary = {}
     for r in rows:
         src = r.get("source_sheet") or "UNKNOWN"
         summary[src] = summary.get(src, 0) + 1
 
     print("  ▶ 소스 시트별 레코드 집계:")
-    for src, count in sorted(summary.items(), key=lambda x: x[1], reverse=True):
-        print(f"     - {src}: {count:,}건")
+    for src, count in sorted(summary.items(), key=lambda x: x[1], reverse=True)[:15]:
+        print(f"     - {src}: {count}건")
+
+    snapshot_data = {
+        "timestamp": datetime.datetime.now().isoformat(),
+        "total_count": len(rows),
+        "summary": summary,
+        "records": rows
+    }
 
     with open(file_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "timestamp": datetime.datetime.now().isoformat(),
-            "total_count": len(rows),
-            "summary": summary,
-            "records": rows
-        }, f, ensure_ascii=False, indent=2)
+        json.dump(snapshot_data, f, ensure_ascii=False, indent=2)
 
-    file_size_kb = round(os.path.getsize(file_path) / 1024, 1)
-    print(f"✅ 백업 완료! 저장 경로: {file_path} ({file_size_kb} KB)")
+    file_size_kb = os.path.getsize(file_path) / 1024
+    print(f"✅ 백업 완료! 저장 경로: {file_path} ({file_size_kb:.1f} KB)")
     return file_path
 
-def restore(snapshot_file):
-    if not os.path.exists(snapshot_file):
-        print(f"❌ 파일을 찾을 수 없습니다: {snapshot_file}")
-        return False
-
-    print(f"⚠️ 복원 착수: {snapshot_file}")
-    with open(snapshot_file, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    records = data.get("records", [])
-    print(f"  ▶ 복원 대상 레코드 수: {len(records):,}건")
-    confirm = input("정말로 Supabase DB를 이 스냅샷으로 덮어쓰시겠습니까? (yes/no): ")
-    if confirm.strip().lower() != "yes":
-        print("복원 취소됨.")
-        return False
-
-    # Batch upsert
-    batch_size = 100
-    for i in range(0, len(records), batch_size):
-        batch = records[i:i + batch_size]
-        body = json.dumps(batch).encode('utf-8')
-        req = urllib.request.Request(
-            f"{SUPABASE_URL}/rest/v1/delivery_schedules",
-            data=body,
-            headers={**HEADERS, "Prefer": "resolution=merge-duplicates"},
-            method="POST"
-        )
-        with urllib.request.urlopen(req) as resp:
-            pass
-        print(f"  ▶ {i + len(batch)} / {len(records)} 복원 진행 중...")
-
-    print("✅ 복원 완료!")
-    return True
-
 if __name__ == "__main__":
-    if len(sys.argv) > 2 and sys.argv[1] == "--restore":
-        restore(sys.argv[2])
-    else:
-        backup()
+    backup()
