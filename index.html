@@ -8716,7 +8716,7 @@
         </head>
         <body>
           ${manifestHtml}
-        </body>
+</body>
         </html>
       `);
       doc.close();
@@ -10732,16 +10732,8 @@
         console.warn('Realtime subscription warning:', e);
       }
 
-      // 2. 스마트 백그라운드 폴링 (25초 주기: 웹소켓 슬립 및 백그라운드 탭 대비)
-      // [대역폭 99% 절감] 실시간 데이터 변경은 WebSocket(realtimeChannel)으로 즉시 감지되므로,
-      // 12초마다 수백 개 행(Base64 사진 포함)을 조회하던 과도한 Egress 유발 로직을 완전 제거
-      if (syncPollingInterval) clearInterval(syncPollingInterval);
-      syncPollingInterval = setInterval(function() {
-        if (!document.hidden) {
-          triggerSync(true);
-        }
-      }, 25000);
-
+      // 2. 스마트 백그라운드 폴링 (25초 주기: 절전 워치독과 연동)
+      startSyncPolling();
       // 알림 배지 이력 쿼리는 10분에 1회 가볍게 보조 폴링
       setInterval(function() {
         if (!document.hidden && typeof refreshHistoryNotificationBadges === 'function') {
@@ -10759,6 +10751,131 @@
     window.addEventListener('focus', function() {
       triggerSync(true);
     });
+// ==========================================
+    // 💤 Smart Dual-Time Idle Sleep Watchdog Engine
+    // - 09:00 ~ 18:00 (주간): 1시간 30분 (90분) 미조작 시 절전 진입
+    // - 18:00 ~ 09:00 (야간): 30분 미조작 시 절전 진입
+    // - 텍스트 입력 중이거나 모달 오픈 시 절전 진입 방어
+    // - 마우스/키/터치 즉시 0.1초 만에 최신 데이터 갱신 및 정상 복귀
+    // ==========================================
+    var isSystemSleeping = false;
+    var lastUserActivityTime = Date.now();
+    var lastActivityThrottle = 0;
+
+    function getIdleTimeoutLimitMs() {
+      var h = new Date().getHours();
+      return (h >= 9 && h < 18) ? (90 * 60 * 1000) : (30 * 60 * 1000);
+    }
+
+    function isUserActivelyTypingOrModalOpen() {
+      var el = document.activeElement;
+      if (el) {
+        var tag = (el.tagName || '').toUpperCase();
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el.isContentEditable) {
+          return true;
+        }
+      }
+      var modalIds = [
+        'fieldIssueModal', 'editScheduleModal', 'contractHistoryModal',
+        'parcelInspectPhotoModal', 'serverMonitorModal', 'userHistoryModal'
+      ];
+      for (var i = 0; i < modalIds.length; i++) {
+        var m = document.getElementById(modalIds[i]);
+        if (m && !m.classList.contains('hidden') && m.style.display !== 'none') {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    function recordUserActivity() {
+      var now = Date.now();
+      if (now - lastActivityThrottle < 4000 && !isSystemSleeping) {
+        return;
+      }
+      lastActivityThrottle = now;
+      lastUserActivityTime = now;
+
+      if (isSystemSleeping) {
+        wakeUpFromIdleSleep();
+      }
+    }
+
+    function renderIdleSleepUI(isSleeping) {
+      var pill = document.getElementById('idleSleepPill');
+      if (pill) {
+        if (isSleeping) {
+          pill.classList.remove('hidden');
+          pill.classList.add('flex');
+        } else {
+          pill.classList.add('hidden');
+          pill.classList.remove('flex');
+        }
+      }
+      var monitorBtn = document.getElementById('serverMonitorBtn');
+      if (monitorBtn) {
+        if (isSleeping) {
+          monitorBtn.title = '💤 데이터 절전 모드 가동 중 (트래픽 0 KB 동결)';
+        } else {
+          monitorBtn.title = '실시간 서버 인프라 & 트래픽 모니터링';
+        }
+      }
+    }
+
+    function enterIdleSleepMode() {
+      if (isSystemSleeping) return;
+      if (isUserActivelyTypingOrModalOpen()) {
+        lastUserActivityTime = Date.now();
+        return;
+      }
+      isSystemSleeping = true;
+      if (syncPollingInterval) {
+        clearInterval(syncPollingInterval);
+        syncPollingInterval = null;
+      }
+      renderIdleSleepUI(true);
+      console.log('💤 [Idle Sleep] 절전 모드 가동: 25초 폴링 중지 (트래픽 0 KB 동결)');
+    }
+
+    function wakeUpFromIdleSleep() {
+      if (!isSystemSleeping) return;
+      isSystemSleeping = false;
+      lastUserActivityTime = Date.now();
+      renderIdleSleepUI(false);
+      startSyncPolling();
+      triggerSync(true);
+      showToast('🟢 실시간 동기화가 재개되었습니다.');
+      console.log('🟢 [Idle Wakeup] 절전 모드 해제: 실시간 동기화 즉시 재개');
+    }
+
+    function startSyncPolling() {
+      if (syncPollingInterval) clearInterval(syncPollingInterval);
+      syncPollingInterval = setInterval(function() {
+        if (!document.hidden && !isSystemSleeping) {
+          triggerSync(true);
+        }
+      }, 25000);
+    }
+
+    // 10초마다 유휴 타이머 점검
+    setInterval(function() {
+      if (isSystemSleeping) return;
+      var limit = getIdleTimeoutLimitMs();
+      var elapsed = Date.now() - lastUserActivityTime;
+      if (elapsed >= limit) {
+        enterIdleSleepMode();
+      }
+    }, 10000);
+
+    // 사용자 활동 감지 리스너 등록
+    ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'].forEach(function(evt) {
+      window.addEventListener(evt, recordUserActivity, { passive: true });
+    });
+    window.getIdleTimeoutLimitMs = getIdleTimeoutLimitMs;
+    window.enterIdleSleepMode = enterIdleSleepMode;
+    window.wakeUpFromIdleSleep = wakeUpFromIdleSleep;
+
+
 
     // ==========================================
     // Contract History & Field Issue Memo Engine
@@ -12314,5 +12431,16 @@
       }
     });
   </script>
+  <!-- ========================================== -->
+  <!-- 💤 Smart Idle Sleep Floating Indicator Pill -->
+  <!-- ========================================== -->
+  <div id="idleSleepPill" class="fixed bottom-5 right-5 bg-slate-900/95 text-amber-300 text-xs px-4 py-2.5 rounded-2xl shadow-2xl border border-amber-500/40 hidden items-center gap-2.5 backdrop-blur-md z-[9990] transition-all duration-300 cursor-pointer" onclick="wakeUpFromIdleSleep()" title="클릭하거나 마우스를 움직이면 실시간 재연결됩니다">
+    <span class="relative flex h-2.5 w-2.5">
+      <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+      <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-amber-500"></span>
+    </span>
+    <span class="font-black">💤 데이터 절전 모드 가동 중</span>
+    <span class="text-[11px] text-slate-300 hidden sm:inline">(마우스를 움직이거나 터치하면 실시간 동기화 재개)</span>
+  </div>
 </body>
 </html>
