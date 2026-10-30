@@ -1655,6 +1655,7 @@
     var currentYear = _initNow.getFullYear();
     var currentMonth = _initNow.getMonth() + 1; // 1-12
     var vehiclesMaster = [];
+    var globalSubBundleIds = new Set();
     var quickDriverList = ['조경찬', '김승지', '이성호', '장종순', '박종환', '한민혁', '최두성'];
     var _modalDriverTouched = false;
     var tripLogs = [];
@@ -1979,6 +1980,18 @@
                 .neq('contract_no', 'HANDOVER_CONFIG');
 
               var liveSchedules = schRes.data || [];
+              globalSubBundleIds.clear();
+              liveSchedules.forEach(function(ls) {
+                if (ls.memo_special) {
+                  try {
+                    var sp = JSON.parse(ls.memo_special);
+                    if (sp && sp.bundle_role === 'sub') {
+                      globalSubBundleIds.add(String(ls.id));
+                      globalSubBundleIds.add('stop_deliv_' + ls.id);
+                    }
+                  } catch(e) {}
+                }
+              });
 
               tripLogs.forEach(function(log) {
                 var logDrivers = (log.driver_name || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
@@ -2016,7 +2029,19 @@
                   var delivOrder = 0;
 
                   var existingIntermediates = log.stops.filter(function(st) {
-                    return st.type !== 'origin' && st.type !== 'return';
+                    if (st.type === 'origin' || st.type === 'return') return false;
+                    // 묶음 배송의 서브 건은 원천 제외 (기존 저장된 일지에서도 마스터만 유지)
+                    if (st.bundle_role === 'sub') {
+                      stopsChanged = true;
+                      return false;
+                    }
+                    var sIdStr = String(st.id || '');
+                    var sNorm = sIdStr.replace('stop_deliv_', '');
+                    if (typeof globalSubBundleIds !== 'undefined' && (globalSubBundleIds.has(sIdStr) || globalSubBundleIds.has(sNorm))) {
+                      stopsChanged = true;
+                      return false;
+                    }
+                    return true;
                   });
 
                   var matchedDsIds = {};
@@ -2035,11 +2060,16 @@
                         matchedDsIds[matchedDs.id] = true;
                         var isMid = (matchedDs.category === 'mid_return' || (matchedDs.customer_name && matchedDs.customer_name.indexOf('(중간 복귀)') !== -1));
                         var dep = '', arr = '';
+                        var isMaster = false, bCount = 1;
                         if (matchedDs.memo_special) {
                           try {
                             var parsedSp = JSON.parse(matchedDs.memo_special);
                             if (parsedSp.depart) dep = parsedSp.depart;
                             if (parsedSp.arrive) arr = parsedSp.arrive;
+                            if (parsedSp.bundle_role === 'master') {
+                              isMaster = true;
+                              bCount = parsedSp.bundle_count || 1;
+                            }
                           } catch(e) {
                             var dM = matchedDs.memo_special.match(/출발[:\s]*(\d{1,2}:\d{2})/);
                             if (dM) dep = dM[1];
@@ -2049,7 +2079,13 @@
                         }
 
                         if (!st.addr || st.addr === '' || st.addr === '-') st.addr = matchedDs.address || '';
-                        if (!st.memo || st.memo === '' || st.memo === '-') st.memo = isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (matchedDs.items || matchedDs.memo_full || '');
+                        if (isMaster) {
+                          st.bundle_role = 'master';
+                          st.bundle_count = bCount;
+                          st.memo = matchedDs.items || matchedDs.memo_full || st.memo;
+                        } else if (!st.memo || st.memo === '' || st.memo === '-') {
+                          st.memo = isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (matchedDs.items || matchedDs.memo_full || '');
+                        }
                         st.status = matchedDs.status || st.status || '';
                         st.time = matchedDs.visit_time || st.time || '';
                         if (dep) st.depart = dep;
@@ -2374,7 +2410,20 @@
         var sId = String(st.id || '');
         var sName = String(st.name || '');
         if (sName.startsWith('SYSTEM_CONFIG') || sId.includes('HANDOVER') || sId.includes('1356') || sId.includes('1357') || sId.includes('1358') || sId.includes('1359')) return false;
+        // 묶음 서브 건은 상세 경유지 행 및 카운트에서 원천 제외 (마스터 1곳만 집계)
+        if (st.bundle_role === 'sub') return false;
+        if (typeof globalSubBundleIds !== 'undefined') {
+          var sNorm = sId.replace('stop_deliv_', '');
+          if (globalSubBundleIds.has(sId) || globalSubBundleIds.has(sNorm)) return false;
+        }
         return true;
+      });
+      // 배송 번호(#1, #2...) 순차 재정렬
+      var dOrder = 0;
+      stops.forEach(function(st) {
+        if (st.type === 'delivery') {
+          st.order = ++dOrder;
+        }
       });
       var hasOrigin = (stops[0] && stops[0].type === 'origin');
       var startIdx = hasOrigin ? 1 : 0;
@@ -2456,11 +2505,14 @@
           if (stops[0].fuel_fee) legFuel += Number(stops[0].fuel_fee);
         }
 
+        var rawIdx = rawStops.indexOf(s);
         legs.push({
-          stopIndex: i,
+          stopIndex: (rawIdx !== -1 ? rawIdx : i),
           type: isMidReturn ? 'mid_return' : (s.type || 'delivery'),
           badgeText: badgeText,
-          order: isMidReturn ? null : (s.order || (i - startIdx + 1)),
+          bundle_role: s.bundle_role || null,
+          bundle_count: s.bundle_count || null,
+          order: (isReturn || isMidReturn) ? null : (s.order || (i - startIdx + 1)),
           fromName: fromName,
           name: s.name || (isReturn ? '가산 센터' : (isMidReturn ? '가산 센터 (중간 복귀)' : '배송지')),
           addr: s.addr || '',
@@ -2658,6 +2710,7 @@
                   <div class="space-y-0.5">
                     <div class="font-bold text-slate-900 text-xs flex items-center gap-1.5 flex-wrap">
                       <span class="truncate max-w-[200px]" title="${leg.name}">${leg.name}</span>
+                      ${(leg.bundle_role === 'master' || (leg.bundle_count && leg.bundle_count > 1)) ? `<span class="px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 text-[9.5px] font-bold border border-indigo-200">🔗 묶음 ${leg.bundle_count || 2}건</span>` : ''}
                       ${leg.depart ? `<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 text-[10px] font-bold border border-blue-200">🚀 출발 ${leg.depart}</span>` : ''}
                       ${leg.arrive ? `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 text-[10px] font-bold border border-emerald-200">🏁 도착 ${leg.arrive}</span>` : ''}
                       ${leg.status === '도착완료' || leg.status === '완료' || leg.status === '배송완료' 
@@ -4228,7 +4281,18 @@
           var sId = String(st.id || '');
           var sName = String(st.name || '');
           if (sName.startsWith('SYSTEM_CONFIG') || sId.includes('HANDOVER') || sId.includes('1356') || sId.includes('1357') || sId.includes('1358') || sId.includes('1359')) return false;
+          if (st.bundle_role === 'sub') return false;
+          if (typeof globalSubBundleIds !== 'undefined') {
+            var sNorm = sId.replace('stop_deliv_', '');
+            if (globalSubBundleIds.has(sId) || globalSubBundleIds.has(sNorm)) return false;
+          }
           return true;
+        });
+        var mOrder = 0;
+        modalStops.forEach(function(s) {
+          if (s.type === 'delivery') {
+            s.order = ++mOrder;
+          }
         });
         if (modalStops.length > 0 && modalStops[0].type === 'origin') {
           modalStops[0].name = isCustomOrigin ? (log.origin_name || '현지(자택) 출발지') : '가산 센터';

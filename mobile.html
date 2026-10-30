@@ -2951,6 +2951,10 @@
             var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
             if (isQuick || isPickup || isParcel) return false;
 
+            // [핵심 가드] 묶음 배송의 서브 건은 법인차량 경유지에서 원천 제외 (마스터 1건만 경유지로 집계)
+            var b = parseMobileBundleInfo(r);
+            if (b && b.role === 'sub') return false;
+
             // [핵심 가드] 해당 차량 운행자(drvName)의 배송지만 배타적 포함 (타 차량 기사 배송지 원천 차단)
             if (drvName && drvName !== '전체' && drvName !== '관리자') {
               var recDrv = (r.driver_name || '').trim();
@@ -2963,6 +2967,7 @@
           });
 
           eligibleRecords.forEach(function(r, idx) {
+            var b = parseMobileBundleInfo(r);
             var times = getStopTimes(r);
             stops.push({
               id: 'stop_deliv_' + (r.id || (idx + 1)),
@@ -2974,7 +2979,9 @@
               depart: times.depart || '',
               arrive: times.arrive || '',
               status: r.status || r.의뢰상태 || '출발대기',
-              memo: r.items || r.product_name || (r.order_memo ? ` (${r.order_memo})` : ''),
+              memo: (b && b.role === 'master' && b.mergedItems) ? b.mergedItems : (r.items || r.product_name || (r.order_memo ? ` (${r.order_memo})` : '')),
+              bundle_role: (b ? b.role : null),
+              bundle_contracts: (b ? b.contracts : null),
               contact: r.contact || (r.contact_name ? `${r.contact_name} ${r.contact_phone || ''}`.trim() : '')
             });
           });
