@@ -1421,6 +1421,8 @@
 
       var hasSelected = (selectedMobileRouteStopKeys.size > 0);
       driverRecords.forEach(function(r, idx) {
+        var bInfo = parseMobileBundleInfo(r);
+        if (bInfo && bInfo.role === 'sub') return;
         var k = getMobileRecordStopKey(r);
         if (hasSelected && !selectedMobileRouteStopKeys.has(k)) return;
         var coord = getCoordForAddress(r.address);
@@ -4259,7 +4261,7 @@
         if (adminBar) adminBar.classList.remove('hidden');
 
         if (!selectedViewingDriver) {
-          selectedViewingDriver = (currentUser.role === 'driver') ? currentUser.id : '__ALL__';
+          selectedViewingDriver = (currentUser && currentUser.role === 'driver') ? currentUser.id : '__ALL__';
         }
         populateMobileAdminDriverSelect();
 
@@ -4301,6 +4303,68 @@
       return 'bg-blue-100 text-blue-800';
     }
 
+
+    // ==========================================
+    // Mobile Bundle Helper Engine (동일 배송지 묶음 연동)
+    // ==========================================
+    function parseMobileBundleInfo(r) {
+      if (!r) return null;
+      var raw = r.memo_special || '';
+      if (!raw) return null;
+      try {
+        var p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        if (p && (p.bundle_id || p.bundle_role)) {
+          return {
+            id: p.bundle_id,
+            role: p.bundle_role,
+            masterId: p.bundle_master_id,
+            subIds: p.bundle_sub_ids || [],
+            contracts: p.bundle_contracts || [],
+            originalItems: p.original_items || '',
+            mergedItems: p.merged_items || '',
+            customer: p.bundle_customer || '',
+            addr: p.bundle_addr || ''
+          };
+        }
+      } catch(e) {}
+      return null;
+    }
+
+    async function syncBundleSubRecordsMobile(masterRecord, newStatus, newTimes) {
+      if (!masterRecord || !supabaseClient) return;
+      var b = parseMobileBundleInfo(masterRecord);
+      if (!b || b.role !== 'master' || !b.subIds || b.subIds.length === 0) return;
+
+      try {
+        for (var i = 0; i < b.subIds.length; i++) {
+          var sId = b.subIds[i];
+          var subRec = driverRecords.find(function(item) { return item.id == sId; });
+          var subObj = {};
+          if (subRec && subRec.memo_special) {
+            try { subObj = JSON.parse(subRec.memo_special); } catch(e) {}
+          }
+          if (newTimes) {
+            if (newTimes.depart) subObj.depart = newTimes.depart;
+            if (newTimes.arrive) subObj.arrive = newTimes.arrive;
+            if (newTimes.issue) subObj.issue = newTimes.issue;
+            if (newTimes.photos) subObj.photos = newTimes.photos;
+            if (newTimes.photo) subObj.photo = newTimes.photo;
+            if (newTimes.inspectPhotos) subObj.inspectPhotos = newTimes.inspectPhotos;
+          }
+          var payload = { memo_special: JSON.stringify(subObj) };
+          if (newStatus) payload.status = newStatus;
+
+          await supabaseClient.from('delivery_schedules').update(payload).eq('id', sId);
+          if (subRec) {
+            subRec.memo_special = JSON.stringify(subObj);
+            if (newStatus) subRec.status = newStatus;
+          }
+        }
+      } catch(err) {
+        console.warn('Failed to sync bundle sub records in mobile:', err);
+      }
+    }
+
     function renderCards() {
       var container = document.getElementById('cardsContainer');
       var prevScrollY = window.scrollY || document.documentElement.scrollTop;
@@ -4315,6 +4379,8 @@
       container.innerHTML = '';
 
       var realDeliveries = driverRecords.filter(function(r) {
+        var b = parseMobileBundleInfo(r);
+        if (b && b.role === 'sub') return false;
         return r.category !== 'mid_return' && (!r.customer_name || r.customer_name.indexOf('(중간 복귀)') === -1);
       });
       var total = realDeliveries.length;
@@ -4387,6 +4453,9 @@
 
       var delivStopNum = 0;
       driverRecords.forEach(function(r, idx) {
+        var bInfo = parseMobileBundleInfo(r);
+        if (bInfo && bInfo.role === 'sub') return;
+
         var isFirst = (idx === 0);
         var isLast = (idx === driverRecords.length - 1);
         var isMidReturn = (r.category === 'mid_return' || r.category === '중간복귀' || (r.customer_name && r.customer_name.indexOf('(중간 복귀)') !== -1));
@@ -4475,7 +4544,7 @@
         var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
         var isArrived = !!times.arrive || r.status === '도착완료' || r.status === '수령완료' || r.status === '퀵출발' || r.status === '배송완료';
         var isDriving = !isArrived && (!!times.depart || r.status === '운행중' || r.status === '접수완료');
-        var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+        var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
 
         var contactObj = parseContactInfo(r.contact);
         var phoneNum = contactObj.phone;
@@ -4504,6 +4573,7 @@
                   ${isQuick ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">⚡ 퀵</span>' : ''}
                   ${isPickup ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">🏢 방문수령</span>' : ''}
                   ${isParcel ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">📮 택배출고</span>' : ''}
+                  ${(bInfo && bInfo.role === 'master') ? `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-link text-[9px] text-purple-600"></i> 묶음배송 ${(bInfo.contracts && bInfo.contracts.length) || (bInfo.subIds.length + 1)}건</span>` : ''}
                   <span class="text-[10px] text-slate-400 font-bold">${r.visit_time || '방문시간 무관'}</span>
                   ${r.driver_name ? `<span class="text-[9.5px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">${r.driver_name}</span>` : ''}
                 </div>
@@ -4522,11 +4592,22 @@
               <i class="fa-solid fa-location-dot text-indigo-600 text-xs"></i>
               <span class="break-all">${r.address || '주소지 미등록'}</span>
             </div>
-            ${r.item_info ? `
+            ${(bInfo && bInfo.role === 'master' && bInfo.contracts && bInfo.contracts.length > 0) ? `
+              <div class="text-[10px] font-mono text-purple-700 bg-purple-50/80 p-1.5 rounded-lg border border-purple-200 flex items-center gap-1.5 flex-wrap">
+                <i class="fa-solid fa-file-contract text-purple-600"></i>
+                <span class="font-bold">묶인 계약(${bInfo.contracts.length}건):</span>
+                <span>${bInfo.contracts.join(', ')}</span>
+              </div>
+            ` : ''}
+            ${(bInfo && bInfo.role === 'master' && bInfo.mergedItems) ? `
+              <div class="text-[11px] text-purple-900 bg-purple-50/50 p-1.5 rounded-lg border border-purple-100 font-bold pl-2 flex items-center gap-1">
+                <span>📦</span> <span class="font-bold text-purple-950">${bInfo.mergedItems}</span>
+              </div>
+            ` : (r.item_info ? `
               <div class="text-[11px] text-slate-600 font-medium pl-4">
                 📦 <span class="font-bold text-slate-800">${r.item_info}</span>
               </div>
-            ` : ''}
+            ` : '')}
           </div>
 
           <!-- Memo -->
@@ -5296,6 +5377,7 @@
             memo_special: jsonStr
           }).eq('id', r.id);
           if (res.error) throw res.error;
+          syncBundleSubRecordsMobile(r, null, times);
         } catch(err) {
           console.error('Failed to save field memo in modal:', err);
           showToast('❌ 메모 저장 실패: ' + (err.message || err));
@@ -5377,7 +5459,7 @@
       var r = driverRecords[idx];
       if (!r) return;
 
-      var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+      var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
       // 타 기사 배송건 조회 시: 출발 상태 기록 없이 단순 티맵 길안내만 허용
       if (!isMyRecord) {
         if (confirm(`ℹ️ [조회 전용 길안내]\n[${r.driver_name || '타 기사'}] 기사님에게 배정된 배송건입니다.\n\n출발 시각을 기록하지 않고 단순 티맵 경로 안내만 확인하시겠습니까?`)) {
@@ -5430,7 +5512,7 @@
       var r = driverRecords[idx];
       if (!r) return;
 
-      var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+      var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
       if (!isMyRecord) {
         alert(`ℹ️ [권한 안내]\n[${r.driver_name || '타 기사'}] 기사님의 배송 건은 도착 완료 처리를 할 수 없습니다.\n본인에게 배정된 배송 건만 완료 처리가 가능합니다.`);
         return;
@@ -5461,6 +5543,7 @@
 
           r.memo_special = jsonStr;
           r.status = '도착완료';
+          syncBundleSubRecordsMobile(r, '도착완료', times);
           renderCards();
           if (currentMobileVehicleNo) {
             syncTodayScheduleToVehicleLog(currentMobileVehicleNo);
@@ -5488,7 +5571,7 @@
       var r = driverRecords[idx];
       if (!r) return;
 
-      var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+      var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
       if (!isMyRecord) {
         alert(`ℹ️ [권한 안내]\n[${r.driver_name || '타 기사'}] 기사님의 배송 건은 상태 변경을 할 수 없습니다.`);
         return;
@@ -5649,7 +5732,7 @@
       var r = driverRecords[idx];
       if (!r) return;
 
-      var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+      var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
       if (!isMyRecord) {
         alert(`ℹ️ [권한 안내]\n[${r.driver_name || '타 기사'}] 기사님의 배송 건은 상태 변경을 할 수 없습니다.`);
         return;
@@ -5703,7 +5786,7 @@
       var r = driverRecords[idx];
       if (!r) return;
 
-      var isMyRecord = (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id);
+      var isMyRecord = (currentUser && (currentUser.role === 'admin' || (r.driver_name || '').trim() === currentUser.id));
       if (!isMyRecord) {
         alert(`ℹ️ [권한 안내]\n[${r.driver_name || '타 기사'}] 기사님의 배송 건은 상태 변경을 할 수 없습니다.`);
         return;
@@ -6148,7 +6231,7 @@
 
     // Reorder & Cloud Sync
     async function moveStopOrder(idx, dir) {
-      if (currentUser.role !== 'admin' && selectedViewingDriver !== currentUser.id) {
+      if (currentUser && currentUser.role !== 'admin' && selectedViewingDriver !== currentUser.id) {
         showToast('ℹ️ 본인 배송 목록에서만 순서를 변경할 수 있습니다.');
         return;
       }

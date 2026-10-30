@@ -667,6 +667,10 @@
         <button onclick="applyBatchDriverAssignment()" class="px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-lg transition shadow-xs flex items-center gap-1">
           <i class="fa-solid fa-user-check"></i> 일괄 배정 적용
         </button>
+        <span class="text-indigo-300">|</span>
+        <button type="button" onclick="mergeSelectedDeliveries()" title="동일 배송지/고객사의 여러 건을 1건의 묶음 배송으로 결합" class="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition shadow-xs flex items-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-link"></i> 동일 배송지 묶음 합치기
+        </button>
       </div>
       <button onclick="clearTableSelection()" class="text-slate-500 hover:text-slate-800 font-bold text-xs underline">
         선택 해제
@@ -8148,6 +8152,10 @@
           if (driverFilter === '' && d !== '') return false;
           if (driverFilter !== '' && d !== driverFilter) return false;
         }
+        // 묶음 서브 건은 최상단 목록에서 숨김 (마스터 행 내부에 종속 표출)
+        var spBundle = parseBundleInfo(r);
+        if (spBundle && spBundle.role === 'sub') return false;
+
         if (kw) {
           var matchStr = (r.고객사 + ' ' + r.주소 + ' ' + r.품목_수량 + ' ' + r.담당기사 + ' ' + r.계약번호 + ' ' + (r.배송방법 || '') + ' ' + (r.비고_전문 || '')).toLowerCase();
           if (matchStr.indexOf(kw) === -1) return false;
@@ -8282,6 +8290,24 @@
                 </button>
               ` : ''}
             </div>
+            ${(function() {
+              var bInfo = parseBundleInfo(r);
+              if (bInfo && bInfo.role === 'master') {
+                var cCount = (bInfo.contracts && bInfo.contracts.length) || ((bInfo.subIds && bInfo.subIds.length + 1)) || 2;
+                return `
+                  <div class="mt-1 flex items-center gap-1">
+                    <button type="button" onclick="openBundleDetailModal(${r.ID})" class="px-1.5 py-0.5 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 rounded font-black text-[9.5px] inline-flex items-center gap-1 transition shadow-2xs cursor-pointer" title="동일 배송지 묶음 배송: 클릭하여 상세 계약 목록 확인">
+                      <i class="fa-solid fa-link text-purple-600 text-[8.5px]"></i>
+                      <span>묶음 ${cCount}건</span>
+                    </button>
+                    <button type="button" onclick="unmergeDeliveryBundle(${r.ID})" class="px-1 py-0.5 text-slate-400 hover:text-rose-600 text-[9px] font-bold rounded hover:bg-rose-50 transition" title="묶음 해제 (개별 분리)">
+                      <i class="fa-solid fa-link-slash"></i>
+                    </button>
+                  </div>
+                `;
+              }
+              return '';
+            })()}
             ${(histInfo && histInfo.count > 0) ? `
               <div class="mt-1">
                 <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="px-1.5 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[9.5px] inline-flex items-center gap-1 transition shadow-2xs cursor-pointer" title="과거 출고/배송 이력 ${histInfo.count}건 존재 (클릭 시 상세 이력 조회)">
@@ -9316,6 +9342,355 @@
         allCheck.indeterminate = false;
       }
       updateBatchAssignToolbar();
+    }
+
+
+    // ==========================================
+    // Delivery Bundle & Merge Engine (동일 배송지 묶음 합치기)
+    // ==========================================
+    function parseBundleInfo(r) {
+      if (!r) return null;
+      var raw = r.추후일정_특이사항 || r.memo_special || '';
+      if (!raw) return null;
+      try {
+        var p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        if (p && (p.bundle_id || p.bundle_role)) {
+          return {
+            id: p.bundle_id,
+            role: p.bundle_role, // 'master' | 'sub'
+            masterId: p.bundle_master_id,
+            subIds: p.bundle_sub_ids || [],
+            contracts: p.bundle_contracts || [],
+            originalItems: p.original_items || '',
+            mergedItems: p.merged_items || '',
+            customer: p.bundle_customer || '',
+            addr: p.bundle_addr || ''
+          };
+        }
+      } catch(e) {}
+      return null;
+    }
+
+    function combineDeliveryItems(itemsList) {
+      var counts = {};
+      var order = [];
+      var otherItems = [];
+
+      itemsList.forEach(function(raw) {
+        if (!raw || !raw.trim()) return;
+        var parts = raw.split(/[\r\n,]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+        parts.forEach(function(part) {
+          var m1 = part.match(/^(.*?)\s*\(\s*(\d+)\s*(?:대|개|ea|EA)?\s*\)$/);
+          var m2 = !m1 ? part.match(/^(.*?)\s+(\d+)\s*(?:대|개|ea|EA)$/) : null;
+
+          if (m1) {
+            var name = m1[1].trim();
+            var qty = parseInt(m1[2], 10) || 1;
+            if (!counts[name]) {
+              counts[name] = 0;
+              order.push(name);
+            }
+            counts[name] += qty;
+          } else if (m2) {
+            var name2 = m2[1].trim();
+            var qty2 = parseInt(m2[2], 10) || 1;
+            if (!counts[name2]) {
+              counts[name2] = 0;
+              order.push(name2);
+            }
+            counts[name2] += qty2;
+          } else {
+            if (otherItems.indexOf(part) === -1) {
+              otherItems.push(part);
+            }
+          }
+        });
+      });
+
+      var resultParts = [];
+      order.forEach(function(name) {
+        resultParts.push(name + ' (' + counts[name] + ')');
+      });
+      otherItems.forEach(function(it) {
+        resultParts.push(it);
+      });
+
+      return resultParts.join(' , ');
+    }
+
+    async function mergeSelectedDeliveries() {
+      var checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+      if (checkedBoxes.length < 2) {
+        Swal.fire('묶음 합치기 안내', '같은 배송지로 가는 배송 건을 2개 이상 선택해주세요.', 'warning');
+        return;
+      }
+
+      var selectedRecords = [];
+      var seenIds = new Set();
+      checkedBoxes.forEach(function(cb) {
+        var id = cb.dataset.id;
+        var idx = parseInt(cb.dataset.idx, 10);
+        var rec = (!isNaN(idx) && records[idx]) ? records[idx] : records.find(function(r) { return String(r.ID) === String(id); });
+        if (rec && !seenIds.has(rec.ID)) {
+          seenIds.add(rec.ID);
+          selectedRecords.push(rec);
+        }
+      });
+
+      if (selectedRecords.length < 2) {
+        Swal.fire('선택 확인', '2개 이상의 고유한 배송 건을 선택해주세요.', 'warning');
+        return;
+      }
+
+      // 1. 배송일자 검증
+      var firstDate = selectedRecords[0].배송일자;
+      var hasDifferentDate = selectedRecords.some(function(r) { return r.배송일자 !== firstDate; });
+      if (hasDifferentDate) {
+        Swal.fire('배송일자 불일치', '배송일자가 서로 다른 건은 묶음 배송으로 합칠 수 없습니다.', 'error');
+        return;
+      }
+
+      // 2. 고객사 또는 주소 비교 (안내 및 확인)
+      var firstCust = selectedRecords[0].고객사 || '';
+      var firstAddr = selectedRecords[0].주소 || '';
+      var isSameCust = selectedRecords.every(function(r) { return (r.고객사 || '').trim() === firstCust.trim(); });
+      var isSameAddr = selectedRecords.every(function(r) { 
+        var a1 = (r.주소 || '').replace(/\s+/g, '');
+        var a2 = firstAddr.replace(/\s+/g, '');
+        return a1.indexOf(a2) !== -1 || a2.indexOf(a1) !== -1;
+      });
+
+      var confirmMsg = `
+        <div class="text-left text-xs space-y-2">
+          <p class="font-bold text-slate-800">선택된 <b>${selectedRecords.length}개</b>의 배송 건을 1건의 묶음 배송으로 합치시겠습니까?</p>
+          <div class="p-2 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+            <div class="text-indigo-800 font-bold"><i class="fa-solid fa-building"></i> 고객사: ${firstCust}</div>
+            <div class="text-slate-600 truncate"><i class="fa-solid fa-location-dot"></i> 배송지: ${firstAddr}</div>
+            <div class="text-purple-700 font-mono text-[11px]"><i class="fa-solid fa-file-contract"></i> 묶인 계약: ${selectedRecords.map(function(r){ return r.계약번호; }).join(', ')}</div>
+          </div>
+          <p class="text-slate-500 text-[11px]">합치면 배송기사 모바일 웹에 1개 카드로 노출되며, 운행일지에도 1개 경유지로 집계됩니다.</p>
+        </div>
+      `;
+
+      if (!isSameCust || !isSameAddr) {
+        confirmMsg += `<p class="text-amber-600 font-bold text-xs mt-1">⚠️ 주의: 고객사명이나 주소 표기가 완전히 일치하지 않습니다. 동일 목적지가 맞는지 확인해주세요.</p>`;
+      }
+
+      var res = await Swal.fire({
+        title: '동일 배송지 묶음 합치기',
+        html: confirmMsg,
+        icon: 'question',
+        showCancelButton: true,
+        confirmButtonText: '🔗 묶음 합치기 실행',
+        cancelButtonText: '취소',
+        confirmButtonColor: '#9333ea'
+      });
+
+      if (!res.isConfirmed) return;
+
+      var bundleId = 'BUNDLE_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      var masterRecord = selectedRecords[0];
+      var subRecords = selectedRecords.slice(1);
+      var allContracts = selectedRecords.map(function(r) { return r.계약번호 || '-'; });
+      var allItemsRaw = selectedRecords.map(function(r) { return r.품목_수량 || ''; });
+      var mergedItems = combineDeliveryItems(allItemsRaw);
+      var subIds = subRecords.map(function(r) { return r.ID; });
+
+      var masterSpecialObj = {};
+      if (masterRecord.추후일정_특이사항) {
+        try { masterSpecialObj = JSON.parse(masterRecord.추후일정_특이사항); } catch(e) {}
+      }
+      masterSpecialObj.bundle_id = bundleId;
+      masterSpecialObj.bundle_role = 'master';
+      masterSpecialObj.bundle_sub_ids = subIds;
+      masterSpecialObj.bundle_contracts = allContracts;
+      masterSpecialObj.bundle_customer = masterRecord.고객사;
+      masterSpecialObj.bundle_addr = masterRecord.주소;
+      masterSpecialObj.original_items = masterRecord.품목_수량 || '';
+      masterSpecialObj.merged_items = mergedItems;
+      masterSpecialObj.bundled_at = new Date().toISOString();
+
+      try {
+        var masterPayload = {
+          items: mergedItems,
+          memo_special: JSON.stringify(masterSpecialObj)
+        };
+        var mRes = await supabaseClient.from('delivery_schedules').update(masterPayload).eq('id', masterRecord.ID);
+        if (mRes.error) throw mRes.error;
+
+        for (var i = 0; i < subRecords.length; i++) {
+          var sub = subRecords[i];
+          var subSpecialObj = {};
+          if (sub.추후일정_특이사항) {
+            try { subSpecialObj = JSON.parse(sub.추후일정_특이사항); } catch(e) {}
+          }
+          subSpecialObj.bundle_id = bundleId;
+          subSpecialObj.bundle_role = 'sub';
+          subSpecialObj.bundle_master_id = masterRecord.ID;
+          subSpecialObj.bundle_contracts = allContracts;
+          subSpecialObj.original_items = sub.품목_수량 || '';
+          subSpecialObj.bundled_at = new Date().toISOString();
+
+          var sRes = await supabaseClient.from('delivery_schedules').update({
+            memo_special: JSON.stringify(subSpecialObj)
+          }).eq('id', sub.ID);
+          if (sRes.error) throw sRes.error;
+        }
+
+        Swal.fire({
+          icon: 'success',
+          title: '묶음 합치기 완료',
+          text: `[${masterRecord.고객사}] 외 ${subRecords.length}건이 1건의 묶음 배송으로 결합되었습니다.`,
+          timer: 1500,
+          showConfirmButton: false
+        });
+
+        clearTableSelection();
+        await triggerSync(false);
+      } catch(err) {
+        console.error('Error merging delivery bundle:', err);
+        Swal.fire('묶음 합치기 실패', 'DB 업데이트 중 오류가 발생했습니다: ' + (err.message || ''), 'error');
+      }
+    }
+
+    async function unmergeDeliveryBundle(masterId) {
+      var masterRecord = records.find(function(r) { return r.ID == masterId; });
+      if (!masterRecord) return;
+      var bInfo = parseBundleInfo(masterRecord);
+      if (!bInfo || bInfo.role !== 'master') return;
+
+      var subIds = bInfo.subIds || [];
+      var totalCount = subIds.length + 1;
+
+      var res = await Swal.fire({
+        title: '묶음 배송 해제',
+        html: `현재 묶여 있는 <b>${totalCount}개 계약 건</b>을 다시 원래의 개별 배송 건으로 분리하시겠습니까?`,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: '🔗 묶음 해제 (개별 건으로 분리)',
+        cancelButtonText: '취소',
+        confirmButtonColor: '#e11d48'
+      });
+
+      if (!res.isConfirmed) return;
+
+      try {
+        var masterSpecialObj = {};
+        if (masterRecord.추후일정_특이사항) {
+          try { masterSpecialObj = JSON.parse(masterRecord.추후일정_특이사항); } catch(e) {}
+        }
+        var origItems = masterSpecialObj.original_items || masterRecord.품목_수량;
+        delete masterSpecialObj.bundle_id;
+        delete masterSpecialObj.bundle_role;
+        delete masterSpecialObj.bundle_sub_ids;
+        delete masterSpecialObj.bundle_contracts;
+        delete masterSpecialObj.bundle_customer;
+        delete masterSpecialObj.bundle_addr;
+        delete masterSpecialObj.original_items;
+        delete masterSpecialObj.merged_items;
+        delete masterSpecialObj.bundled_at;
+
+        var mRes = await supabaseClient.from('delivery_schedules').update({
+          items: origItems,
+          memo_special: JSON.stringify(masterSpecialObj)
+        }).eq('id', masterId);
+        if (mRes.error) throw mRes.error;
+
+        for (var i = 0; i < subIds.length; i++) {
+          var sId = subIds[i];
+          var subRec = records.find(function(r) { return r.ID == sId; });
+          var subSpecialObj = {};
+          if (subRec && subRec.추후일정_특이사항) {
+            try { subSpecialObj = JSON.parse(subRec.추후일정_특이사항); } catch(e) {}
+          }
+          delete subSpecialObj.bundle_id;
+          delete subSpecialObj.bundle_role;
+          delete subSpecialObj.bundle_master_id;
+          delete subSpecialObj.bundle_contracts;
+          delete subSpecialObj.original_items;
+          delete subSpecialObj.bundled_at;
+
+          var sRes = await supabaseClient.from('delivery_schedules').update({
+            memo_special: JSON.stringify(subSpecialObj)
+          }).eq('id', sId);
+          if (sRes.error) throw sRes.error;
+        }
+
+        Swal.fire({
+          icon: 'success',
+          title: '묶음 해제 완료',
+          text: '개별 배송 건으로 정상 분리되었습니다.',
+          timer: 1500,
+          showConfirmButton: false
+        });
+
+        await triggerSync(false);
+      } catch(err) {
+        console.error('Error unmerging bundle:', err);
+        Swal.fire('묶음 해제 실패', 'DB 업데이트 중 오류가 발생했습니다: ' + (err.message || ''), 'error');
+      }
+    }
+
+    function openBundleDetailModal(masterId) {
+      var masterRecord = records.find(function(r) { return r.ID == masterId; });
+      if (!masterRecord) return;
+      var bInfo = parseBundleInfo(masterRecord);
+      if (!bInfo) return;
+
+      var subRecs = (bInfo.subIds || []).map(function(sId) {
+        return records.find(function(r) { return r.ID == sId; });
+      }).filter(Boolean);
+
+      var allRecs = [masterRecord].concat(subRecs);
+
+      var html = `
+        <div class="text-left space-y-3 text-xs">
+          <div class="p-2.5 bg-purple-50 rounded-xl border border-purple-200">
+            <div class="font-black text-purple-900 text-sm flex items-center gap-1.5">
+              <i class="fa-solid fa-link text-purple-600"></i>
+              <span>${masterRecord.고객사} (총 ${allRecs.length}건 묶음 배송)</span>
+            </div>
+            <div class="text-slate-600 text-xs mt-1"><i class="fa-solid fa-location-dot text-slate-400"></i> ${masterRecord.주소}</div>
+            <div class="text-slate-800 font-bold mt-1.5 bg-white p-2 rounded-lg border border-purple-100">
+              <span class="text-purple-700 font-black">[통합 품목]</span> ${bInfo.mergedItems || masterRecord.품목_수량}
+            </div>
+          </div>
+
+          <div class="space-y-1.5">
+            <div class="font-bold text-slate-600 text-[11px]">개별 계약 상세 내역:</div>
+            ${allRecs.map(function(rec, idx) {
+              var isM = (idx === 0);
+              return `
+                <div class="p-2 bg-slate-50 rounded-xl border border-slate-200 flex items-start justify-between gap-2">
+                  <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                      <span class="px-1.5 py-0.5 rounded text-[9.5px] font-black ${isM ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-slate-200 text-slate-700'}">${isM ? '대표 마스터' : '묶음 서브'}</span>
+                      <span class="font-mono font-bold text-indigo-700">${rec.계약번호 || '계약번호 없음'}</span>
+                      <span class="text-slate-500 font-medium">(${rec.구분 || '배송'} / ${rec.배송방법 || '직배송'})</span>
+                    </div>
+                    <div class="text-slate-700 font-medium mt-1 truncate">품목: ${rec.품목_수량 || '-'}</div>
+                    ${rec.비고_전문 ? `<div class="text-amber-800 text-[10.5px] mt-0.5 truncate">비고: ${rec.비고_전문}</div>` : ''}
+                  </div>
+                </div>
+              `;
+            }).join('')}
+          </div>
+        </div>
+      `;
+
+      Swal.fire({
+        title: '묶음 배송 상세 정보',
+        html: html,
+        confirmButtonText: '확인',
+        confirmButtonColor: '#6366f1',
+        showDenyButton: true,
+        denyButtonText: '🔗 묶음 해제',
+        denyButtonColor: '#e11d48'
+      }).then(function(result) {
+        if (result.isDenied) {
+          unmergeDeliveryBundle(masterId);
+        }
+      });
     }
 
     async function applyBatchDriverAssignment() {

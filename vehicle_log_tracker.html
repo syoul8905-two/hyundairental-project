@@ -1989,6 +1989,13 @@
                   var isPickup = (s.delivery_method === '방문수령' || s.driver_name === '방문수령' || (s.category === '수령' && s.delivery_method !== '직배송'));
                   var isParcel = (s.delivery_method === '택배' || s.driver_name === '택배');
                   if (isQuick || isPickup || isParcel) return false;
+                  // 묶음 배송의 서브 건은 운행일지 목적지 목록에서 제외 (마스터 1건만 경유지로 집계)
+                  if (s.memo_special) {
+                    try {
+                      var sp = JSON.parse(s.memo_special);
+                      if (sp && sp.bundle_role === 'sub') return false;
+                    } catch(e) {}
+                  }
                   return logDrivers.indexOf((s.driver_name || '').trim()) !== -1;
                 });
 
@@ -3996,6 +4003,14 @@
             if (allowedDrivers.length > 0) {
               var rDrv = (r.driver_name || '').trim();
               if (allowedDrivers.indexOf(rDrv) === -1) return false;
+            }
+
+            // [핵심 가드 3] 묶음 배송의 서브 건은 목적지 목록에서 제외 (마스터 1건만 경유지로 집계)
+            if (r.memo_special) {
+              try {
+                var p = JSON.parse(r.memo_special);
+                if (p && p.bundle_role === 'sub') return false;
+              } catch(e) {}
             }
             return true;
           });
