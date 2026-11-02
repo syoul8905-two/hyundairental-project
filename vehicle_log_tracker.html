@@ -5461,7 +5461,7 @@
         `• 시작 계기판: ${startKm.toLocaleString()} km\n` +
         `• 종료 계기판: ${endKm.toLocaleString()} km\n` +
         `• 총 주행거리: ${totalDist.toLocaleString()} km\n\n` +
-        `※ 기존 해당 월의 일지는 최신 배분 내역으로 자동 교체됩니다.`;
+        `※ 기존 입력된 주차비 및 주유비 금액은 안전하게 100% 자동 승계 및 보존됩니다.`;
 
       if (!confirm(confirmMsg)) return;
 
@@ -5476,6 +5476,35 @@
 
       try {
         if (supabaseClient) {
+          // 0. 기존 입력되어 있던 주차비/주유비 및 경유지별 비용 맵핑 보존 (Zero Data-Loss 방어)
+          var existingFeesMap = {};
+          if (Array.isArray(tripLogs)) {
+            tripLogs.forEach(function(l) {
+              if (l.trip_date) {
+                var p = Number(l.parking_fee || 0);
+                var f = Number(l.fuel_fee || 0);
+                var stopFeeMap = {};
+                if (Array.isArray(l.stops)) {
+                  l.stops.forEach(function(st) {
+                    if (st.name) {
+                      stopFeeMap[st.name] = {
+                        parking_fee: Number(st.parking_fee || 0),
+                        fuel_fee: Number(st.fuel_fee || 0)
+                      };
+                      if (st.parking_fee) p = Math.max(p, Number(st.parking_fee));
+                      if (st.fuel_fee) f = Math.max(f, Number(st.fuel_fee));
+                    }
+                  });
+                }
+                existingFeesMap[l.trip_date] = {
+                  parking_fee: p,
+                  fuel_fee: f,
+                  stopFees: stopFeeMap
+                };
+              }
+            });
+          }
+
           // 1. Delete existing VEHICLE_TRIP_LOGS for this vehicle and month
           await supabaseClient.from('delivery_schedules')
             .delete()
@@ -5487,7 +5516,11 @@
           // 2. Insert new batch
           var defaultDriver = document.getElementById('autoDistributeDriverText').innerText.trim() || '조경찬';
           var rowsToInsert = cachedAutoDistributedLogs.map(function(item) {
+            var exist = existingFeesMap[item.trip_date] || { parking_fee: 0, fuel_fee: 0, stopFees: {} };
             var dayStops = (item.stops && item.stops.length > 0) ? JSON.parse(JSON.stringify(item.stops)) : [];
+            var dayPark = exist.parking_fee || 0;
+            var dayFuel = exist.fuel_fee || 0;
+
             if (dayStops.length > 0) {
               var legCount = dayStops.length;
               var curK = item.start_km;
@@ -5498,8 +5531,9 @@
                 st.start_km = curK;
                 st.end_km = curK + legD;
                 st.distance_km = legD;
-                st.parking_fee = Number(st.parking_fee || 0);
-                st.fuel_fee = Number(st.fuel_fee || 0);
+                var sMatch = exist.stopFees[st.name];
+                st.parking_fee = sMatch ? Number(sMatch.parking_fee || 0) : Number(st.parking_fee || 0);
+                st.fuel_fee = sMatch ? Number(sMatch.fuel_fee || 0) : Number(st.fuel_fee || 0);
                 curK += legD;
               });
             }
@@ -5515,8 +5549,8 @@
               is_local_dismissal: false,
               destination_addr: '서울 금천구 벚꽃로 278 (가산 센터)',
               destination_name: '가산 센터',
-              parking_fee: 0,
-              fuel_fee: 0,
+              parking_fee: dayPark,
+              fuel_fee: dayFuel,
               is_unoperated: false,
               stops: dayStops,
               memo: item.delivery_count > 0 ? (item.navi_dist_km > 0 ? `배송 ${item.delivery_count}건 운행 (네비 ${item.navi_dist_km}km)` : `배송 ${item.delivery_count}건 운행`) : '업무용 정기 운행'
