@@ -409,11 +409,18 @@
         });
 
         var delivOrder = 0;
+        var deletedIdsSet = new Set((existingPayload.deleted_stop_ids || []).map(String));
+        var seenCustAddr = new Set();
         eligible.forEach(function(r) {
           var stopId = 'stop_deliv_' + r.id;
+          if (deletedIdsSet.has(String(r.id)) || deletedIdsSet.has(stopId) || deletedIdsSet.has('NAME:' + (r.customer_name || '').trim())) return;
           var prev = prevStopsMap[stopId] || {};
           var times = {};
           try { if (r.memo_special) times = JSON.parse(r.memo_special); } catch(e) {}
+          if (times && times.bundle_role === 'sub') return;
+          var caKey = (r.customer_name || '').trim() + '___' + (r.address || '').trim();
+          if (r.customer_name && seenCustAddr.has(caKey)) return;
+          if (r.customer_name) seenCustAddr.add(caKey);
 
           var isMid = (r.category === 'mid_return' || r.category === '중간복귀' || (r.customer_name && r.customer_name.indexOf('(중간 복귀)') !== -1));
           stops.push({

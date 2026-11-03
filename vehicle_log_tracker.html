@@ -3,6 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
   <title>현대렌탈 법인차량 운행일지 관리 시스템</title>
   <!-- Tailwind CSS CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
@@ -15,14 +18,14 @@
   <!-- Daum 우편번호 서비스 (도로명 주소 검색) -->
   <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
   <!-- 공통 모듈화 스크립트 (Phase 1, Phase 2, Phase 3: Zero-Downtime 안전 로드) -->
-  <script src="js/constants-master.js"></script>
-  <script src="js/supabase-config.js"></script>
-  <script src="js/time-utils.js"></script>
-  <script src="js/geo-utils.js"></script>
-  <script src="js/audit-service.js"></script>
-  <script src="js/schedule-service.js"></script>
-  <script src="js/vehicle-service.js"></script>
-  <script src="js/vehicle-tracker-ui.js"></script>
+  <script src="js/constants-master.js?v=20261103_v2"></script>
+  <script src="js/supabase-config.js?v=20261103_v2"></script>
+  <script src="js/time-utils.js?v=20261103_v2"></script>
+  <script src="js/geo-utils.js?v=20261103_v2"></script>
+  <script src="js/audit-service.js?v=20261103_v2"></script>
+  <script src="js/schedule-service.js?v=20261103_v2"></script>
+  <script src="js/vehicle-service.js?v=20261103_v2"></script>
+  <script src="js/vehicle-tracker-ui.js?v=20261103_v2"></script>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700;800;900&display=swap');
     body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif; }
@@ -1981,6 +1984,7 @@
                 .neq('contract_no', 'HANDOVER_CONFIG');
 
               var liveSchedules = schRes.data || [];
+              schedulesCache = liveSchedules;
               globalSubBundleIds.clear();
               liveSchedules.forEach(function(ls) {
                 if (ls.memo_special) {
@@ -1993,6 +1997,8 @@
                   } catch(e) {}
                 }
               });
+
+              var todayStrNow = new Date().toLocaleDateString('sv');
 
               tripLogs.forEach(function(log) {
                 var logDrivers = (log.driver_name || '').split(',').map(function(s) { return s.trim(); }).filter(Boolean);
@@ -2031,12 +2037,17 @@
 
                   var deletedStopIds = new Set((log.deleted_stop_ids || []).map(String));
                   var seenIntermediateKeys = new Set();
+                  var keptStopsByAddrKey = {};
+
                   var existingIntermediates = log.stops.filter(function(st) {
                     if (st.type === 'origin' || st.type === 'return') return false;
                     var sIdStr = String(st.id || '');
                     var sNorm = sIdStr.replace('stop_deliv_', '');
-                    // [1. 사용자 직접 삭제 건 영구 배제]
-                    if (deletedStopIds.has(sIdStr) || deletedStopIds.has(sNorm)) {
+                    var sNameTrim = (st.name || '').trim();
+                    var sAddrKey = 'KEY:' + sNameTrim + '___' + normalizeAddrForDedupe(st.addr);
+
+                    // [1. 사용자 직접 삭제 건 영구 배제 (ID, 고객명, 정규화 주소키 전방위 대조)]
+                    if (deletedStopIds.has(sIdStr) || deletedStopIds.has(sNorm) || deletedStopIds.has('NAME:' + sNameTrim) || deletedStopIds.has(sAddrKey)) {
                       stopsChanged = true;
                       return false;
                     }
@@ -2049,33 +2060,55 @@
                       stopsChanged = true;
                       return false;
                     }
-                    // [3. 중복 경유지 방어적 자동 정제]
-                    var dedupeKey = (sIdStr && !sIdStr.startsWith('stop_manual_')) 
-                      ? ('ID_' + sIdStr) 
-                      : ('NAME_ADDR_' + (st.name || '').trim() + '___' + (st.addr || '').trim());
-                    if (seenIntermediateKeys.has(dedupeKey)) {
+                    // [3. 중복 경유지 방어적 자동 정제 (동일 ID 또는 동일 고객사+도로명주소 중복 제거)]
+                    var idDedupeKey = (sIdStr && !sIdStr.startsWith('stop_manual_')) ? ('ID_' + sIdStr) : null;
+                    var isMidStop = (st.type === 'mid_return' || sNameTrim.indexOf('(중간 복귀)') !== -1);
+                    if ((idDedupeKey && seenIntermediateKeys.has(idDedupeKey)) || (!isMidStop && sNameTrim && seenIntermediateKeys.has(sAddrKey))) {
                       stopsChanged = true;
+                      if (!isMidStop && keptStopsByAddrKey[sAddrKey]) {
+                        keptStopsByAddrKey[sAddrKey].parking_fee = Number(keptStopsByAddrKey[sAddrKey].parking_fee || 0) + Number(st.parking_fee || 0);
+                        keptStopsByAddrKey[sAddrKey].fuel_fee = Number(keptStopsByAddrKey[sAddrKey].fuel_fee || 0) + Number(st.fuel_fee || 0);
+                      }
+                      log.deleted_stop_ids = log.deleted_stop_ids || [];
+                      if (sIdStr) log.deleted_stop_ids.push(sIdStr);
+                      if (sNorm) log.deleted_stop_ids.push(sNorm);
+                      log.deleted_stop_ids = Array.from(new Set(log.deleted_stop_ids));
+                      deletedStopIds.add(sIdStr);
+                      deletedStopIds.add(sNorm);
                       console.log('🧹 [일지 중복 경유지 자동 필터링]', st.name, sIdStr);
                       return false;
                     }
-                    seenIntermediateKeys.add(dedupeKey);
+                    if (idDedupeKey) seenIntermediateKeys.add(idDedupeKey);
+                    if (!isMidStop && sNameTrim) {
+                      seenIntermediateKeys.add(sAddrKey);
+                      keptStopsByAddrKey[sAddrKey] = st;
+                    }
                     return true;
                   });
 
                   var matchedDsIds = {};
+                  var isPastOrClosedLog = Boolean(log.is_closed) || Boolean(log.trip_date && log.trip_date < todayStrNow);
+                  var hasSavedRouteHistory = existingIntermediates.length > 0 || deletedStopIds.size > 0 || isPastOrClosedLog;
 
-                  if (existingIntermediates.length > 0) {
-                    // [사용자 순서 100% 절대 보존] 사용자가 일지에서 직접 조정한 경유지 순서를 그대로 유지하면서 관제 실시간 정보만 업데이트
+                  if (hasSavedRouteHistory) {
+                    // [사용자 순서 및 삭제 상태 100% 절대 보존]
                     existingIntermediates.forEach(function(st) {
                       var stIdStr = String(st.id || '');
                       var stNorm = stIdStr.replace('stop_deliv_', '');
-                      var matchedDs = dateSchedules.find(function(ds) {
+                      var stAddrNorm = normalizeAddrForDedupe(st.addr);
+                      var matchedDs = null;
+
+                      dateSchedules.forEach(function(ds) {
                         var dsIdStr = String(ds.id || '');
-                        return dsIdStr === stNorm || dsIdStr === stIdStr || (ds.customer_name && st.name && ds.customer_name === st.name);
+                        var sameId = (dsIdStr === stNorm || dsIdStr === stIdStr);
+                        var sameCustomerAndRoad = (ds.customer_name && st.name && ds.customer_name.trim() === st.name.trim() && (!stAddrNorm || !ds.address || normalizeAddrForDedupe(ds.address) === stAddrNorm));
+                        if (sameId || sameCustomerAndRoad) {
+                          matchedDsIds[ds.id] = true;
+                          if (!matchedDs || sameId) matchedDs = ds;
+                        }
                       });
 
                       if (matchedDs) {
-                        matchedDsIds[matchedDs.id] = true;
                         var isMid = (matchedDs.category === 'mid_return' || (matchedDs.customer_name && matchedDs.customer_name.indexOf('(중간 복귀)') !== -1));
                         var dep = '', arr = '';
                         var isMaster = false, bCount = 1;
@@ -2120,68 +2153,75 @@
                       mergedStops.push(st);
                     });
 
-                    // 사후에 관제에 신규 추가된 배송 건이 있다면 목록 뒤에 자동 병합
-                    dateSchedules.forEach(function(ds) {
-                      var dsIdStr = String(ds.id || '');
-                      // [사용자 직접 삭제 건 영구 차단]
-                      if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr)) {
-                        return;
-                      }
-                      // 이미 매칭되었거나 동일 고객사+주소가 목록에 이미 존재하는 경우 중복 추가 차단
-                      if (matchedDsIds[ds.id]) return;
-                      var alreadyInMerged = mergedStops.some(function(ms) {
-                        var msIdStr = String(ms.id || '');
-                        if (msIdStr === ('stop_deliv_' + dsIdStr) || msIdStr === dsIdStr) return true;
-                        var sameName = (ms.name && ds.customer_name && ms.name.trim() === ds.customer_name.trim());
-                        var sameAddr = (ms.addr && ds.address && ms.addr.trim() === ds.address.trim());
-                        return sameName && sameAddr;
-                      });
-                      if (alreadyInMerged) {
-                        matchedDsIds[ds.id] = true;
-                        return;
-                      }
+                    // [핵심 가드] 이미 마감되었거나 과거 날짜인 일지는 DB에 저장된 stops가 최종 확정본이므로
+                    // 관제 테이블(delivery_schedules)에서 삭제된 경유지를 절대 다시 부활(병합)시키지 않음!
+                    // 오직 당일 운행 중(!isPastOrClosedLog)인 일지에 한해서만 신규 배차 건을 자동 병합함.
+                    if (!isPastOrClosedLog) {
+                      dateSchedules.forEach(function(ds) {
+                        var dsIdStr = String(ds.id || '');
+                        var dsNameTrim = (ds.customer_name || '').trim();
+                        var dsAddrKey = 'KEY:' + dsNameTrim + '___' + normalizeAddrForDedupe(ds.address);
 
-                      stopsChanged = true;
-                      var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
-                      var dep = '', arr = '';
-                      if (ds.memo_special) {
-                        try {
-                          var parsedSp = JSON.parse(ds.memo_special);
-                          if (parsedSp.depart) dep = parsedSp.depart;
-                          if (parsedSp.arrive) arr = parsedSp.arrive;
-                        } catch(e) {}
-                      }
-                      mergedStops.push({
-                        id: 'stop_deliv_' + ds.id,
-                        type: isMid ? 'mid_return' : 'delivery',
-                        order: isMid ? null : (++delivOrder),
-                        name: ds.customer_name || (isMid ? '🏢 가산 센터 (중간 복귀)' : '배송지'),
-                        addr: ds.address || '',
-                        time: ds.visit_time || '',
-                        depart: dep,
-                        arrive: arr,
-                        status: ds.status || '',
-                        memo: isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || ''),
-                        contact: ds.contact || '',
-                        parking_fee: 0,
-                        fuel_fee: 0
+                        // [사용자 직접 삭제 건 영구 차단]
+                        if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr) || deletedStopIds.has('NAME:' + dsNameTrim) || deletedStopIds.has(dsAddrKey)) {
+                          return;
+                        }
+                        if (matchedDsIds[ds.id]) return;
+                        var alreadyInMerged = mergedStops.some(function(ms) {
+                          var msIdStr = String(ms.id || '');
+                          if (msIdStr === ('stop_deliv_' + dsIdStr) || msIdStr === dsIdStr) return true;
+                          var sameName = (ms.name && ds.customer_name && ms.name.trim() === ds.customer_name.trim());
+                          var sameAddr = (ms.addr && ds.address && normalizeAddrForDedupe(ms.addr) === normalizeAddrForDedupe(ds.address));
+                          return sameName && sameAddr;
+                        });
+                        if (alreadyInMerged) {
+                          matchedDsIds[ds.id] = true;
+                          return;
+                        }
+
+                        stopsChanged = true;
+                        var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
+                        var dep = '', arr = '';
+                        if (ds.memo_special) {
+                          try {
+                            var parsedSp = JSON.parse(ds.memo_special);
+                            if (parsedSp.depart) dep = parsedSp.depart;
+                            if (parsedSp.arrive) arr = parsedSp.arrive;
+                          } catch(e) {}
+                        }
+                        mergedStops.push({
+                          id: 'stop_deliv_' + ds.id,
+                          type: isMid ? 'mid_return' : 'delivery',
+                          order: isMid ? null : (++delivOrder),
+                          name: ds.customer_name || (isMid ? '🏢 가산 센터 (중간 복귀)' : '배송지'),
+                          addr: ds.address || '',
+                          time: ds.visit_time || '',
+                          depart: dep,
+                          arrive: arr,
+                          status: ds.status || '',
+                          memo: isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || ''),
+                          contact: ds.contact || '',
+                          parking_fee: 0,
+                          fuel_fee: 0
+                        });
                       });
-                    });
+                    }
                   } else {
                     // 최초 일지 생성 시: 관제 스케줄 순서대로 초기 생성 (중복 배송지 원천 필터링)
                     var seenInitKeys = new Set();
                     dateSchedules.forEach(function(ds) {
                       var dsIdStr = String(ds.id || '');
-                      if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr)) return;
-                      var dedupeKey = (ds.customer_name || '').trim() + '___' + (ds.address || '').trim();
-                      if (seenInitKeys.has(dedupeKey)) {
-                        var existingStop = mergedStops.find(function(ms) { return ms.name === ds.customer_name && ms.addr === ds.address; });
+                      var dsNameTrim = (ds.customer_name || '').trim();
+                      var dsAddrKey = 'KEY:' + dsNameTrim + '___' + normalizeAddrForDedupe(ds.address);
+                      if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr) || deletedStopIds.has('NAME:' + dsNameTrim) || deletedStopIds.has(dsAddrKey)) return;
+                      if (seenInitKeys.has(dsAddrKey)) {
+                        var existingStop = mergedStops.find(function(ms) { return (ms.name || '').trim() === dsNameTrim && normalizeAddrForDedupe(ms.addr) === normalizeAddrForDedupe(ds.address); });
                         if (existingStop && ds.items) {
                           existingStop.memo = (existingStop.memo ? existingStop.memo + ', ' : '') + ds.items;
                         }
                         return;
                       }
-                      seenInitKeys.add(dedupeKey);
+                      seenInitKeys.add(dsAddrKey);
                       var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
                       var dep = '', arr = '';
                       if (ds.memo_special) {
@@ -2236,10 +2276,8 @@
                     }
                   }
 
-                  // 4) stops 재구성
-                  if (mergedStops.length > 0) {
-                    log.stops = [originStop].concat(mergedStops).concat([returnStop]);
-                  }
+                  // 4) stops 재구성 (모든 중간 경유지가 삭제되어 mergedStops가 0건인 경우에도 출발->복귀로 즉시 반영)
+                  log.stops = [originStop].concat(mergedStops).concat([returnStop]);
 
                   // 5) stops 개수 변경 또는 비정상 단순 균등 분할 감지 시 지리적 비례 거리 자동 재계산
                   var dayTotalDist = log.distance_km || (log.end_km - log.start_km) || 0;
@@ -2251,6 +2289,16 @@
 
                   if (needsDistRebalance && dayTotalDist > 0 && totalLegCount > 0) {
                     distributeDayDistanceProportionally(log.stops, log.start_km, log.end_km);
+                  }
+
+                  // 중복 정제 등이 발생한 경우 DB에도 백그라운드 영구 반영
+                  if (stopsChanged && supabaseClient && log.id) {
+                    window._ignoreRealtimeUntil = Date.now() + 3000;
+                    var cleanPayload = Object.assign({}, log);
+                    supabaseClient.from('delivery_schedules')
+                      .update({ memo_full: JSON.stringify(cleanPayload) })
+                      .eq('id', log.id)
+                      .then(function() {});
                   }
                 }
               });
@@ -2270,11 +2318,23 @@
       renderTripLogTable();
     }
 
+    function normalizeAddrForDedupe(addr) {
+      var s = String(addr || '').trim();
+      var roadMatch = s.match(/([가-힣]+(?:시|도)\s+)?([가-힣]+(?:시|군|구)\s+)?([가-힣0-9]+(?:로|길|대로)\s*\d+(?:-\d+)?)/);
+      if (roadMatch) {
+        return ((roadMatch[2] || '') + (roadMatch[3] || '')).replace(/\s+/g, '');
+      }
+      return s.replace(/\([^)]*\)/g, '').replace(/\s+/g, '').slice(0, 18);
+    }
+
     function setupSupabaseRealtime() {
       if (!supabaseClient) return;
       try {
         supabaseClient.channel('vehicle_logs_channel')
           .on('postgres_changes', { event: '*', schema: 'public', table: 'delivery_schedules' }, function(payload) {
+            if (window._ignoreRealtimeUntil && Date.now() < window._ignoreRealtimeUntil) {
+              return;
+            }
             loadVehicleData(false);
             if (typeof loadMaintenanceData === 'function') {
               loadMaintenanceData();
@@ -3122,9 +3182,11 @@
             is_unoperated: Boolean(log.is_unoperated),
             is_closed: true,
             closed_at: arriveTime,
+            deleted_stop_ids: log.deleted_stop_ids || [],
             stops: log.stops,
             memo: log.memo
           };
+          window._ignoreRealtimeUntil = Date.now() + 3000;
 
           await supabaseClient.from('delivery_schedules')
             .update({
@@ -3222,7 +3284,7 @@
 
       try {
         if (supabaseClient) {
-          var payload = {
+          var payload = Object.assign({}, log, {
             vehicle_no: log.vehicle_no,
             trip_date: log.trip_date,
             driver_name: log.driver_name,
@@ -3236,10 +3298,12 @@
             parking_fee: log.parking_fee,
             fuel_fee: log.fuel_fee,
             is_unoperated: log.is_unoperated,
+            deleted_stop_ids: log.deleted_stop_ids || [],
             stops: log.stops,
             memo: log.memo
-          };
+          });
 
+          window._ignoreRealtimeUntil = Date.now() + 3000;
           await supabaseClient.from('delivery_schedules')
             .update({
               memo_full: JSON.stringify(payload)
@@ -3263,7 +3327,7 @@
     }
 
     async function deleteDirectStopLeg(logId, stopIndex) {
-      var log = tripLogs.find(function(l) { return l.id === logId; });
+      var log = tripLogs.find(function(l) { return Number(l.id) === Number(logId); });
       if (!log || !log.stops || !log.stops[stopIndex]) {
         alert('삭제할 경유지 데이터를 찾을 수 없습니다.');
         return;
@@ -3275,56 +3339,70 @@
         return;
       }
 
-      var stopName = stop.name || '해당 경유지';
-      if (!confirm(`⚠️ [${stopName}] 경유지를 ${log.trip_date} 운행일지에서 삭제하시겠습니까?\n\n※ 삭제 후 남은 경유지들의 순번 및 거리가 자동으로 재계산됩니다.`)) {
-        return;
-      }
+      var stopName = (stop.name || '해당 경유지').trim();
+      var stopAddrNorm = normalizeAddrForDedupe(stop.addr);
 
       try {
-        // [영구 삭제 블랙리스트 등록] 재로딩/관제 동기화 시 다시 살아나지 않도록 ID 영구 등록
+        // [영구 삭제 블랙리스트(Tombstone) 등록] 쌍둥이 스케줄이나 관제 동기화로 절대 부활하지 않도록 ID + 고객사명 + 주소키 모두 등록
         var stopIdStr = String(stop.id || '');
         var stopNorm = stopIdStr.replace('stop_deliv_', '');
         log.deleted_stop_ids = log.deleted_stop_ids || [];
         if (stopIdStr) log.deleted_stop_ids.push(stopIdStr);
         if (stopNorm && stopNorm !== stopIdStr) log.deleted_stop_ids.push(stopNorm);
         if (stop.delivery_id) log.deleted_stop_ids.push(String(stop.delivery_id));
+        if (stopName) {
+          log.deleted_stop_ids.push('KEY:' + stopName + '___' + stopAddrNorm);
+          // 남은 경유지에 동일 고객사명이 더 이상 없다면 고객사명 자체도 블랙리스트 등록
+          var otherSameName = log.stops.some(function(s, idx) {
+            return idx !== stopIndex && s.type !== 'origin' && s.type !== 'return' && (s.name || '').trim() === stopName;
+          });
+          if (!otherSameName) {
+            log.deleted_stop_ids.push('NAME:' + stopName);
+          }
+        }
+        // 당일 관제 스케줄 캐시(schedulesCache)에 있는 쌍둥이/동일 고객사 ID도 모두 블랙리스트에 추가
+        if (Array.isArray(schedulesCache)) {
+          schedulesCache.forEach(function(sc) {
+            if (sc.delivery_date === log.trip_date && sc.customer_name && sc.customer_name.trim() === stopName) {
+              if (!stopAddrNorm || !sc.address || normalizeAddrForDedupe(sc.address) === stopAddrNorm) {
+                log.deleted_stop_ids.push(String(sc.id));
+                log.deleted_stop_ids.push('stop_deliv_' + sc.id);
+              }
+            }
+          });
+        }
         log.deleted_stop_ids = Array.from(new Set(log.deleted_stop_ids));
 
-        // Remove the stop
+        // Remove the stop immediately
         log.stops.splice(stopIndex, 1);
 
-        // Renumber orders for delivery/custom stops
+        // Renumber orders & recalculate fee totals
         var curOrder = 0;
+        var totParking = 0;
+        var totFuel = 0;
         log.stops.forEach(function(s) {
           if (s.type !== 'origin' && s.type !== 'return' && s.type !== 'mid_return') {
             s.order = ++curOrder;
           }
+          totParking += Number(s.parking_fee || 0);
+          totFuel += Number(s.fuel_fee || 0);
         });
+        log.parking_fee = totParking;
+        log.fuel_fee = totFuel;
 
         // Recalculate distances for remaining stops if total distance exists
         var totalDist = log.distance_km || (log.end_km - log.start_km) || 0;
-        var hasOrigin = (log.stops[0] && log.stops[0].type === 'origin');
-        var startIdx = hasOrigin ? 1 : 0;
-        var remLegCount = log.stops.length - startIdx;
-
-        if (remLegCount > 0 && totalDist > 0) {
-          var baseD = Math.floor(totalDist / remLegCount);
-          var remD = totalDist % remLegCount;
-          var curOdo = log.start_km;
-          for (var i = startIdx; i < log.stops.length; i++) {
-            var d = baseD + ((i - startIdx) < remD ? 1 : 0);
-            log.stops[i].distance_km = d;
-            log.stops[i].start_km = curOdo;
-            log.stops[i].end_km = curOdo + d;
-            curOdo += d;
-          }
+        if (totalDist > 0 && log.stops.length >= 2) {
+          distributeDayDistanceProportionally(log.stops, log.start_km, log.end_km);
         }
 
-        // [즉시 UI 반영] 사용자 화면에서 0초 만에 바로 사라지도록 즉시 렌더링 (딜레이 0ms)
+        // [0ms 즉시 UI 반영] 확인 팝업이나 전체 재로딩 대기 없이 클릭 즉시 화면에서 제거!
+        window._ignoreRealtimeUntil = Date.now() + 3000;
         renderKpis();
         renderTripLogTable();
+        showToast(`🗑️ [${stopName}] 경유지가 즉시 삭제되었습니다.`);
 
-        // Save to Supabase
+        // Save to Supabase in background
         var payload = Object.assign({}, log);
         if (supabaseClient) {
           var { error } = await supabaseClient
@@ -3336,9 +3414,6 @@
 
           if (error) throw error;
         }
-
-        showToast(`🗑️ [${stopName}] 경유지가 안전하게 삭제되었습니다.`);
-        await loadVehicleData(false);
       } catch(err) {
         console.error('Error deleting stop leg:', err);
         alert('경유지 삭제 오류: ' + (err.message || err));
@@ -4012,19 +4087,24 @@
       }
     }
 
-    function removeModalStop(idx) {
+    async function removeModalStop(idx) {
       if (idx < 0 || idx >= modalStops.length) return;
       if (modalStops[idx].type === 'origin' || modalStops[idx].type === 'return') {
         alert('출발지 및 도착지는 삭제할 수 없습니다.');
         return;
       }
       var removed = modalStops[idx];
-      var removedName = removed.name;
+      var removedName = (removed.name || '').trim();
+      var removedAddrNorm = normalizeAddrForDedupe(removed.addr);
 
       if (!window._modalDeletedStopIds) window._modalDeletedStopIds = [];
       if (removed.id) {
         window._modalDeletedStopIds.push(String(removed.id));
         window._modalDeletedStopIds.push(String(removed.id).replace('stop_deliv_', ''));
+      }
+      if (removedName) {
+        window._modalDeletedStopIds.push('KEY:' + removedName + '___' + removedAddrNorm);
+        window._modalDeletedStopIds.push('NAME:' + removedName);
       }
 
       modalStops.splice(idx, 1);
@@ -4035,7 +4115,33 @@
       if (recDist > 0) {
         document.getElementById('modalSuggestedKm').innerText = recDist.toFixed(1) + ' km';
       }
-      showToast(`🗑️ [${removedName}] 경유지가 제거되었습니다. (하단 [운행일지 저장] 클릭 시 영구 저장됩니다.)`);
+
+      // 기존 일지 수정 모달인 경우 [운행일지 저장]을 누르지 않아도 즉시 DB 및 배경 테이블에 자동 반영
+      var editIdVal = document.getElementById('editLogId') ? document.getElementById('editLogId').value : '';
+      if (editIdVal) {
+        var targetLog = tripLogs.find(function(l) { return Number(l.id) === Number(editIdVal); });
+        if (targetLog) {
+          targetLog.deleted_stop_ids = Array.from(new Set((targetLog.deleted_stop_ids || []).concat(window._modalDeletedStopIds)));
+          targetLog.stops = JSON.parse(JSON.stringify(modalStops));
+          var totalDist = targetLog.distance_km || (targetLog.end_km - targetLog.start_km) || 0;
+          if (totalDist > 0 && targetLog.stops.length >= 2) {
+            distributeDayDistanceProportionally(targetLog.stops, targetLog.start_km, targetLog.end_km);
+          }
+          window._ignoreRealtimeUntil = Date.now() + 3000;
+          renderKpis();
+          renderTripLogTable();
+          if (supabaseClient) {
+            var payload = Object.assign({}, targetLog);
+            supabaseClient.from('delivery_schedules')
+              .update({ memo_full: JSON.stringify(payload) })
+              .eq('id', Number(editIdVal))
+              .then(function() {});
+          }
+          showToast(`🗑️ [${removedName}] 경유지가 즉시 삭제 및 자동 저장되었습니다.`);
+          return;
+        }
+      }
+      showToast(`🗑️ [${removedName}] 경유지가 제거되었습니다.`);
     }
 
     function renumberModalStops() {
