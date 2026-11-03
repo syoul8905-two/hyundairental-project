@@ -2927,74 +2927,11 @@
         var destAddr = dest.addr || DEFAULT_GASAN_ORIGIN.addr;
         var destName = dest.name || DEFAULT_GASAN_ORIGIN.name;
 
-        // Build structured stops list (Origin -> Deliveries -> Return)
-        var stops = [];
-        stops.push({
-          id: 'stop_origin',
-          type: 'origin',
-          name: '가산 센터',
-          addr: DEFAULT_GASAN_ORIGIN.addr,
-          time: '08:30',
-          memo: '출고 및 배송 출발'
-        });
-
-        if (window.driverRecords && window.driverRecords.length > 0) {
-          // 법인차량 경유지는 실제 차량으로 직배송하는 건만 포함 (퀵배송, 방문수령, 택배 제외)
-          var eligibleRecords = window.driverRecords.filter(function(r) {
-            var src = (r.source_sheet || '').trim();
-            var cust = (r.customer_name || '').trim();
-            var contract = (r.contract_no || '').trim();
-            if (src === 'AS_RECORDS' || src.startsWith('SYSTEM_CONFIG') || src.startsWith('VEHICLE_') || cust.startsWith('SYSTEM_CONFIG') || cust.startsWith('VEHICLE_') || contract === 'HANDOVER_CONFIG') return false;
-
-            var isQuick = (r.delivery_method === '퀵배송' || r.delivery_method === '퀵' || r.driver_name === '퀵' || (r.category && r.category.indexOf('퀵') !== -1));
-            var isPickup = (r.delivery_method === '방문수령' || r.driver_name === '방문수령' || (r.category === '수령' && r.delivery_method !== '직배송'));
-            var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
-            if (isQuick || isPickup || isParcel) return false;
-
-            // [핵심 가드] 묶음 배송의 서브 건은 법인차량 경유지에서 원천 제외 (마스터 1건만 경유지로 집계)
-            var b = parseMobileBundleInfo(r);
-            if (b && b.role === 'sub') return false;
-
-            // [핵심 가드] 해당 차량 운행자(drvName)의 배송지만 배타적 포함 (타 차량 기사 배송지 원천 차단)
-            if (drvName && drvName !== '전체' && drvName !== '관리자') {
-              var recDrv = (r.driver_name || '').trim();
-              var drvParts = drvName.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
-              if (drvParts.length > 0 && drvParts.indexOf(recDrv) === -1) {
-                return false;
-              }
-            }
-            return true;
-          });
-
-          eligibleRecords.forEach(function(r, idx) {
-            var b = parseMobileBundleInfo(r);
-            var times = getStopTimes(r);
-            stops.push({
-              id: 'stop_deliv_' + (r.id || (idx + 1)),
-              type: 'delivery',
-              order: idx + 1,
-              name: r.customer_name || '고객사',
-              addr: r.address || r.customer_address || '',
-              time: r.visit_time || r.delivery_time || '',
-              depart: times.depart || '',
-              arrive: times.arrive || '',
-              status: r.status || r.의뢰상태 || '출발대기',
-              memo: (b && b.role === 'master' && b.mergedItems) ? b.mergedItems : (r.items || r.product_name || (r.order_memo ? ` (${r.order_memo})` : '')),
-              bundle_role: (b ? b.role : null),
-              bundle_contracts: (b ? b.contracts : null),
-              contact: r.contact || (r.contact_name ? `${r.contact_name} ${r.contact_phone || ''}`.trim() : '')
-            });
-          });
-        }
-
-        stops.push({
-          id: 'stop_return',
-          type: 'return',
-          name: destName,
-          addr: destAddr,
-          time: '18:00',
-          memo: '운행 복귀 및 마감'
-        });
+        var existingPayload = {};
+        var primaryRowId = null;
+        var dupIdsToDelete = [];
+        var deletedStopIds = new Set();
+        var manualStopsToPreserve = [];
 
         if (supabaseClient) {
           var checkRes = await supabaseClient.from('delivery_schedules')
@@ -3003,10 +2940,6 @@
             .eq('customer_name', vNo)
             .eq('delivery_date', currentDate)
             .order('id', { ascending: false });
-
-          var existingPayload = {};
-          var primaryRowId = null;
-          var dupIdsToDelete = [];
 
           if (checkRes.data && checkRes.data.length > 0) {
             // 이미 마감된 레코드가 있는지 먼저 확인
@@ -3036,18 +2969,110 @@
 
             // 마감되지 않은 레코드 중 최신 ID를 primary로 지정하고 나머지는 중복 정리 대상
             primaryRowId = checkRes.data[0].id;
-            try { existingPayload = JSON.parse(checkRes.data[0].memo_full || '{}'); } catch(e) {}
+            try { 
+              existingPayload = JSON.parse(checkRes.data[0].memo_full || '{}'); 
+              if (Array.isArray(existingPayload.deleted_stop_ids)) {
+                existingPayload.deleted_stop_ids.forEach(function(dId) { deletedStopIds.add(String(dId)); });
+              }
+              if (Array.isArray(existingPayload.stops)) {
+                manualStopsToPreserve = existingPayload.stops.filter(function(st) {
+                  var sId = String(st.id || '');
+                  return st.type !== 'origin' && st.type !== 'return' && sId.startsWith('stop_manual_') && !deletedStopIds.has(sId);
+                });
+              }
+            } catch(e) {}
 
             if (checkRes.data.length > 1) {
               dupIdsToDelete = checkRes.data.slice(1).map(function(r) { return r.id; });
             }
           }
+        }
 
-          var startKm = existingPayload.start_km || veh.current_km || veh.initial_km || 0;
-          var endKm = existingPayload.end_km || startKm;
-          var distanceKm = existingPayload.distance_km || (endKm - startKm) || 0;
+        // Build structured stops list (Origin -> Deliveries -> Return)
+        var stops = [];
+        stops.push({
+          id: 'stop_origin',
+          type: 'origin',
+          name: '가산 센터',
+          addr: DEFAULT_GASAN_ORIGIN.addr,
+          time: '08:30',
+          memo: '출근 및 상차'
+        });
 
-          var mergedPayload = Object.assign({}, existingPayload, {
+        if (window.driverRecords && window.driverRecords.length > 0) {
+          // 법인차량 경유지는 실제 차량으로 직배송하는 건만 포함 (퀵배송, 방문수령, 택배 제외)
+          var eligibleRecords = window.driverRecords.filter(function(r) {
+            var src = (r.source_sheet || '').trim();
+            var cust = (r.customer_name || '').trim();
+            var contract = (r.contract_no || '').trim();
+            if (src === 'AS_RECORDS' || src.startsWith('SYSTEM_CONFIG') || src.startsWith('VEHICLE_') || cust.startsWith('SYSTEM_CONFIG') || cust.startsWith('VEHICLE_') || contract === 'HANDOVER_CONFIG') return false;
+
+            var isQuick = (r.delivery_method === '퀵배송' || r.delivery_method === '퀵' || r.driver_name === '퀵' || (r.category && r.category.indexOf('퀵') !== -1));
+            var isPickup = (r.delivery_method === '방문수령' || r.driver_name === '방문수령' || (r.category === '수령' && r.delivery_method !== '직배송'));
+            var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
+            if (isQuick || isPickup || isParcel) return false;
+
+            // [사용자 직접 삭제 건 배제] 관리자/기사가 일지에서 삭제한 배송지는 모바일 동기화에서도 원천 배제!
+            var rIdStr = String(r.id || '');
+            if (deletedStopIds.has(rIdStr) || deletedStopIds.has('stop_deliv_' + rIdStr)) return false;
+
+            // [핵심 가드] 묶음 배송의 서브 건은 법인차량 경유지에서 원천 제외 (마스터 1건만 경유지로 집계)
+            var b = parseMobileBundleInfo(r);
+            if (b && b.role === 'sub') return false;
+
+            // [핵심 가드] 해당 차량 운행자(drvName)의 배송지만 배타적 포함 (타 차량 기사 배송지 원천 차단)
+            if (drvName && drvName !== '전체' && drvName !== '관리자') {
+              var recDrv = (r.driver_name || '').trim();
+              var drvParts = drvName.split(',').map(function(s) { return s.trim(); }).filter(Boolean);
+              if (drvParts.length > 0 && drvParts.indexOf(recDrv) === -1) {
+                return false;
+              }
+            }
+            return true;
+          });
+
+          var delivIdx = 1;
+          eligibleRecords.forEach(function(r) {
+            var b = parseMobileBundleInfo(r);
+            var times = getStopTimes(r);
+            stops.push({
+              id: 'stop_deliv_' + (r.id || delivIdx),
+              type: 'delivery',
+              order: delivIdx++,
+              name: r.customer_name || '고객사',
+              addr: r.address || r.customer_address || '',
+              time: r.visit_time || r.delivery_time || '',
+              depart: times.depart || '',
+              arrive: times.arrive || '',
+              status: r.status || r.의뢰상태 || '출발대기',
+              memo: (b && b.role === 'master' && b.mergedItems) ? b.mergedItems : (r.items || r.product_name || (r.order_memo ? ` (${r.order_memo})` : '')),
+              bundle_role: (b ? b.role : null),
+              bundle_contracts: (b ? b.contracts : null),
+              contact: r.contact || (r.contact_name ? `${r.contact_name} ${r.contact_phone || ''}`.trim() : '')
+            });
+          });
+
+          // 수기 추가된 경유지가 있다면 순서대로 보존
+          manualStopsToPreserve.forEach(function(mst) {
+            mst.order = delivIdx++;
+            stops.push(mst);
+          });
+        }
+
+        stops.push({
+          id: 'stop_return',
+          type: 'return',
+          name: destName,
+          addr: destAddr,
+          time: '18:00',
+          memo: '운행 복귀 및 마감'
+        });
+
+        var startKm = existingPayload.start_km || veh.current_km || veh.initial_km || 0;
+        var endKm = existingPayload.end_km || startKm;
+        var distanceKm = existingPayload.distance_km || (endKm - startKm) || 0;
+
+                  var mergedPayload = Object.assign({}, existingPayload, {
             vehicle_no: vNo,
             trip_date: currentDate,
             driver_name: drvName,
@@ -3057,6 +3082,7 @@
             destination_addr: destAddr,
             destination_name: destName,
             stops: stops,
+            deleted_stop_ids: existingPayload.deleted_stop_ids || [],
             is_unoperated: false // 기사님이 차량을 선택하여 운행하므로 미운행 상태 자동 해제!
           });
 

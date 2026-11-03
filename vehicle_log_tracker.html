@@ -1899,6 +1899,7 @@
                 memo_special: row.memo_special || '',
                 is_local_dismissal: Boolean(parsed.is_local_dismissal),
                 destination_addr: parsed.destination_addr || '',
+                deleted_stop_ids: Array.isArray(parsed.deleted_stop_ids) ? parsed.deleted_stop_ids : [],
                 stops: (parsed.stops || []).filter(function(st) {
                   var sId = String(st.id || '');
                   var sName = String(st.name || '');
@@ -2028,19 +2029,36 @@
                   var mergedStops = [];
                   var delivOrder = 0;
 
+                  var deletedStopIds = new Set((log.deleted_stop_ids || []).map(String));
+                  var seenIntermediateKeys = new Set();
                   var existingIntermediates = log.stops.filter(function(st) {
                     if (st.type === 'origin' || st.type === 'return') return false;
-                    // 묶음 배송의 서브 건은 원천 제외 (기존 저장된 일지에서도 마스터만 유지)
+                    var sIdStr = String(st.id || '');
+                    var sNorm = sIdStr.replace('stop_deliv_', '');
+                    // [1. 사용자 직접 삭제 건 영구 배제]
+                    if (deletedStopIds.has(sIdStr) || deletedStopIds.has(sNorm)) {
+                      stopsChanged = true;
+                      return false;
+                    }
+                    // [2. 묶음 배송의 서브 건 원천 제외] (마스터 1건만 유지)
                     if (st.bundle_role === 'sub') {
                       stopsChanged = true;
                       return false;
                     }
-                    var sIdStr = String(st.id || '');
-                    var sNorm = sIdStr.replace('stop_deliv_', '');
                     if (typeof globalSubBundleIds !== 'undefined' && (globalSubBundleIds.has(sIdStr) || globalSubBundleIds.has(sNorm))) {
                       stopsChanged = true;
                       return false;
                     }
+                    // [3. 중복 경유지 방어적 자동 정제]
+                    var dedupeKey = (sIdStr && !sIdStr.startsWith('stop_manual_')) 
+                      ? ('ID_' + sIdStr) 
+                      : ('NAME_ADDR_' + (st.name || '').trim() + '___' + (st.addr || '').trim());
+                    if (seenIntermediateKeys.has(dedupeKey)) {
+                      stopsChanged = true;
+                      console.log('🧹 [일지 중복 경유지 자동 필터링]', st.name, sIdStr);
+                      return false;
+                    }
+                    seenIntermediateKeys.add(dedupeKey);
                     return true;
                   });
 
@@ -2104,37 +2122,66 @@
 
                     // 사후에 관제에 신규 추가된 배송 건이 있다면 목록 뒤에 자동 병합
                     dateSchedules.forEach(function(ds) {
-                      if (!matchedDsIds[ds.id]) {
-                        stopsChanged = true;
-                        var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
-                        var dep = '', arr = '';
-                        if (ds.memo_special) {
-                          try {
-                            var parsedSp = JSON.parse(ds.memo_special);
-                            if (parsedSp.depart) dep = parsedSp.depart;
-                            if (parsedSp.arrive) arr = parsedSp.arrive;
-                          } catch(e) {}
-                        }
-                        mergedStops.push({
-                          id: 'stop_deliv_' + ds.id,
-                          type: isMid ? 'mid_return' : 'delivery',
-                          order: isMid ? null : (++delivOrder),
-                          name: ds.customer_name || (isMid ? '🏢 가산 센터 (중간 복귀)' : '배송지'),
-                          addr: ds.address || '',
-                          time: ds.visit_time || '',
-                          depart: dep,
-                          arrive: arr,
-                          status: ds.status || '',
-                          memo: isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || ''),
-                          contact: ds.contact || '',
-                          parking_fee: 0,
-                          fuel_fee: 0
-                        });
+                      var dsIdStr = String(ds.id || '');
+                      // [사용자 직접 삭제 건 영구 차단]
+                      if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr)) {
+                        return;
                       }
+                      // 이미 매칭되었거나 동일 고객사+주소가 목록에 이미 존재하는 경우 중복 추가 차단
+                      if (matchedDsIds[ds.id]) return;
+                      var alreadyInMerged = mergedStops.some(function(ms) {
+                        var msIdStr = String(ms.id || '');
+                        if (msIdStr === ('stop_deliv_' + dsIdStr) || msIdStr === dsIdStr) return true;
+                        var sameName = (ms.name && ds.customer_name && ms.name.trim() === ds.customer_name.trim());
+                        var sameAddr = (ms.addr && ds.address && ms.addr.trim() === ds.address.trim());
+                        return sameName && sameAddr;
+                      });
+                      if (alreadyInMerged) {
+                        matchedDsIds[ds.id] = true;
+                        return;
+                      }
+
+                      stopsChanged = true;
+                      var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
+                      var dep = '', arr = '';
+                      if (ds.memo_special) {
+                        try {
+                          var parsedSp = JSON.parse(ds.memo_special);
+                          if (parsedSp.depart) dep = parsedSp.depart;
+                          if (parsedSp.arrive) arr = parsedSp.arrive;
+                        } catch(e) {}
+                      }
+                      mergedStops.push({
+                        id: 'stop_deliv_' + ds.id,
+                        type: isMid ? 'mid_return' : 'delivery',
+                        order: isMid ? null : (++delivOrder),
+                        name: ds.customer_name || (isMid ? '🏢 가산 센터 (중간 복귀)' : '배송지'),
+                        addr: ds.address || '',
+                        time: ds.visit_time || '',
+                        depart: dep,
+                        arrive: arr,
+                        status: ds.status || '',
+                        memo: isMid ? '오전 배송 후 센터 복귀 및 오후 재출발' : (ds.items || ds.memo_full || ''),
+                        contact: ds.contact || '',
+                        parking_fee: 0,
+                        fuel_fee: 0
+                      });
                     });
                   } else {
-                    // 최초 일지 생성 시: 관제 스케줄 순서대로 초기 생성
+                    // 최초 일지 생성 시: 관제 스케줄 순서대로 초기 생성 (중복 배송지 원천 필터링)
+                    var seenInitKeys = new Set();
                     dateSchedules.forEach(function(ds) {
+                      var dsIdStr = String(ds.id || '');
+                      if (deletedStopIds.has(dsIdStr) || deletedStopIds.has('stop_deliv_' + dsIdStr)) return;
+                      var dedupeKey = (ds.customer_name || '').trim() + '___' + (ds.address || '').trim();
+                      if (seenInitKeys.has(dedupeKey)) {
+                        var existingStop = mergedStops.find(function(ms) { return ms.name === ds.customer_name && ms.addr === ds.address; });
+                        if (existingStop && ds.items) {
+                          existingStop.memo = (existingStop.memo ? existingStop.memo + ', ' : '') + ds.items;
+                        }
+                        return;
+                      }
+                      seenInitKeys.add(dedupeKey);
                       var isMid = (ds.category === 'mid_return' || (ds.customer_name && ds.customer_name.indexOf('(중간 복귀)') !== -1));
                       var dep = '', arr = '';
                       if (ds.memo_special) {
@@ -3234,6 +3281,15 @@
       }
 
       try {
+        // [영구 삭제 블랙리스트 등록] 재로딩/관제 동기화 시 다시 살아나지 않도록 ID 영구 등록
+        var stopIdStr = String(stop.id || '');
+        var stopNorm = stopIdStr.replace('stop_deliv_', '');
+        log.deleted_stop_ids = log.deleted_stop_ids || [];
+        if (stopIdStr) log.deleted_stop_ids.push(stopIdStr);
+        if (stopNorm && stopNorm !== stopIdStr) log.deleted_stop_ids.push(stopNorm);
+        if (stop.delivery_id) log.deleted_stop_ids.push(String(stop.delivery_id));
+        log.deleted_stop_ids = Array.from(new Set(log.deleted_stop_ids));
+
         // Remove the stop
         log.stops.splice(stopIndex, 1);
 
@@ -3263,6 +3319,10 @@
             curOdo += d;
           }
         }
+
+        // [즉시 UI 반영] 사용자 화면에서 0초 만에 바로 사라지도록 즉시 렌더링 (딜레이 0ms)
+        renderKpis();
+        renderTripLogTable();
 
         // Save to Supabase
         var payload = Object.assign({}, log);
@@ -3795,6 +3855,16 @@
         return;
       }
 
+      // [중복 경유지 방어 가드] 이미 동일 고객사/주소가 등록되어 있는지 검증
+      var isDup = modalStops.some(function(s) {
+        return s.type !== 'origin' && s.type !== 'return' && s.name && s.name.trim() === name && (s.addr === addr || !addr || !s.addr);
+      });
+      if (isDup) {
+        if (!confirm(`⚠️ [중복 알림] "${name}"(${addr || '주소 동일'})이 이미 목록에 등록되어 있습니다.\n\n정말로 동일한 배송지를 한 번 더 추가하시겠습니까?`)) {
+          return;
+        }
+      }
+
       var insertIdx = Math.max(1, modalStops.length - 1);
       var typeLabel = (stopType === 'team1' || stopType === 'other') ? '기타 업무' : (stopType === 'gas') ? '주유소' : (stopType === 'custom') ? '일반 경유' : '배송지';
 
@@ -3948,7 +4018,15 @@
         alert('출발지 및 도착지는 삭제할 수 없습니다.');
         return;
       }
-      var removedName = modalStops[idx].name;
+      var removed = modalStops[idx];
+      var removedName = removed.name;
+
+      if (!window._modalDeletedStopIds) window._modalDeletedStopIds = [];
+      if (removed.id) {
+        window._modalDeletedStopIds.push(String(removed.id));
+        window._modalDeletedStopIds.push(String(removed.id).replace('stop_deliv_', ''));
+      }
+
       modalStops.splice(idx, 1);
       renumberModalStops();
       renderModalStops();
@@ -3957,7 +4035,7 @@
       if (recDist > 0) {
         document.getElementById('modalSuggestedKm').innerText = recDist.toFixed(1) + ' km';
       }
-      showToast(`🗑️ [${removedName}] 경유지가 삭제되었습니다.`);
+      showToast(`🗑️ [${removedName}] 경유지가 제거되었습니다. (하단 [운행일지 저장] 클릭 시 영구 저장됩니다.)`);
     }
 
     function renumberModalStops() {
@@ -4275,6 +4353,7 @@
       document.getElementById('modalParkingFee').value = log.parking_fee;
       document.getElementById('modalFuelFee').value = log.fuel_fee;
       document.getElementById('modalMemo').value = log.memo;
+      window._modalDeletedStopIds = (log && Array.isArray(log.deleted_stop_ids) ? log.deleted_stop_ids.slice() : []);
 
       if (log.stops && log.stops.length > 0) {
         modalStops = JSON.parse(JSON.stringify(log.stops)).filter(function(st) {
@@ -4622,6 +4701,10 @@
       var parsedModalSugg = parseFloat(modalSuggText);
       var realSuggestedKm = (calcRecDist > 0) ? Number(calcRecDist.toFixed(1)) : (!isNaN(parsedModalSugg) && parsedModalSugg > 0 ? parsedModalSugg : 0);
 
+      var existingLog = tripLogs.find(function(l) { return l.id === Number(logId); });
+      var existingDeletedIds = existingLog && Array.isArray(existingLog.deleted_stop_ids) ? existingLog.deleted_stop_ids : [];
+      var finalDeletedIds = Array.from(new Set(existingDeletedIds.concat(window._modalDeletedStopIds || [])));
+
       var logPayload = {
         vehicle_no: vehicleNo,
         trip_date: tripDate,
@@ -4637,6 +4720,7 @@
         destination_addr: finalDestAddr,
         destination_name: destName,
         stops: modalStops,
+        deleted_stop_ids: finalDeletedIds,
         parking_fee: parkingFee,
         fuel_fee: fuelFee,
         is_unoperated: isUnoperated,
