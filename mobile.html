@@ -3110,8 +3110,7 @@
           if (dupIdsToDelete.length > 0) {
             await supabaseClient.from('delivery_schedules').delete().in('id', dupIdsToDelete);
           }
-        }
-      } catch(err) {
+        } catch(err) {
         console.warn('Error syncing schedule to vehicle log:', err);
       } finally {
         _isSyncingTodayVehicleLog[vNo] = false;
@@ -4153,6 +4152,7 @@
               var cName = (row.customer_name || '').trim();
               var infoObj = {
                 id: row.id,
+                contract_no: cNo,
                 delivery_date: row.delivery_date || '',
                 customer_name: row.customer_name || '',
                 driver_name: pTimes.issueAuthor || row.driver_name || '',
@@ -4166,7 +4166,8 @@
               if (cNo && !isPlaceholderContractNo(cNo) && !pastDeliveryNotesMap.has(cNo)) {
                 pastDeliveryNotesMap.set(cNo, infoObj);
               }
-              if (cName && !pastDeliveryNotesByCustomerMap.has(cName)) {
+              // ONLY store in pastDeliveryNotesByCustomerMap if the past record itself has NO valid contract number (placeholder only)
+              if (cName && isPlaceholderContractNo(cNo) && !pastDeliveryNotesByCustomerMap.has(cName)) {
                 pastDeliveryNotesByCustomerMap.set(cName, infoObj);
               }
             }
@@ -4181,15 +4182,29 @@
       if (!r) return null;
       var cNo = (r.contract_no || '').trim();
       var info = null;
-      if (!isPlaceholderContractNo(cNo) && pastDeliveryNotesMap.has(cNo)) {
-        info = pastDeliveryNotesMap.get(cNo);
+
+      // [엄격 계약번호 일치 원칙] 계약번호가 존재하는 건은 오직 '동일 계약번호'의 과거 이력만 연동!
+      // 타 계약 건의 특이사항이 고객사명만으로 오염되어 노출되는 사고를 100% 원천 차단
+      if (!isPlaceholderContractNo(cNo)) {
+        if (pastDeliveryNotesMap.has(cNo)) {
+          info = pastDeliveryNotesMap.get(cNo);
+        }
       } else {
+        // 계약번호가 미정/신규등록 등 placeholder인 건에 한해서만 고객사명으로 연동
         var cName = (r.customer_name || '').trim();
         if (cName && pastDeliveryNotesByCustomerMap.has(cName)) {
           info = pastDeliveryNotesByCustomerMap.get(cName);
         }
       }
+
       if (info && r.id && info.id === r.id) return null;
+
+      // 추가 안전 가드: 계약번호가 다른 과거 정보는 절대 반환하지 않음
+      if (info && !isPlaceholderContractNo(cNo) && info.contract_no && info.contract_no !== cNo) {
+        console.warn(`[PastDeliveryNoteGuard] Blocked cross-contract note leak: current=${cNo} vs past=${info.contract_no}`);
+        return null;
+      }
+
       return info;
     }
 
@@ -4327,7 +4342,20 @@
     // ==========================================
     // Render Cards & Progress
     // ==========================================
+    function isDeliveryCategory(cat) {
+      if (!cat) return true;
+      var c = String(cat).trim();
+      return c === '배송' || c === '출고' || c === '설치' || c === '교환출고';
+    }
+
+    function isRecoveryCategory(cat) {
+      if (!cat) return false;
+      var c = String(cat).trim();
+      return c === '회수' || c === '반납' || c === '교환회수' || c === '수거';
+    }
+
     function getMobileCategoryBadgeStyle(cat) {
+      if (cat === '배송+회수' || cat === '출고+회수' || (cat && cat.indexOf('배송+회수') !== -1)) return 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white font-black shadow-2xs';
       if (cat === '회수') return 'bg-purple-100 text-purple-800';
       if (cat === '교환출고' || (cat && cat.indexOf('교환') !== -1)) return 'bg-indigo-100 text-indigo-800 font-black border border-indigo-200';
       if (cat === '설치') return 'bg-emerald-100 text-emerald-800';
@@ -4347,16 +4375,37 @@
       try {
         var p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
         if (p && (p.bundle_id || p.bundle_role)) {
+          var isMixed = !!p.is_mixed || (r.category === '배송+회수' || (r.category && r.category.indexOf('배송+회수') !== -1)) || ((p.merged_items || '').indexOf('[출고') !== -1 && (p.merged_items || '').indexOf('[회수') !== -1);
+          var outboundItems = p.outbound_items || '';
+          var inboundItems = p.inbound_items || '';
+          if (!outboundItems && isMixed && p.merged_items) {
+            var mOut = p.merged_items.match(/\[출고(?:\/전달)?\]\s*([^|]+)/);
+            if (mOut) outboundItems = mOut[1].trim();
+          }
+          if (!inboundItems && isMixed && p.merged_items) {
+            var mIn = p.merged_items.match(/\[회수(?:\/수거)?\]\s*([^|]+)/);
+            if (mIn) inboundItems = mIn[1].trim();
+          }
           return {
             id: p.bundle_id,
             role: p.bundle_role,
+            count: p.bundle_count || (p.bundle_sub_ids ? p.bundle_sub_ids.length + 1 : (p.bundle_contracts ? p.bundle_contracts.length : 2)),
             masterId: p.bundle_master_id,
             subIds: p.bundle_sub_ids || [],
             contracts: p.bundle_contracts || [],
             originalItems: p.original_items || '',
+            originalCategory: p.original_category || '',
             mergedItems: p.merged_items || '',
             customer: p.bundle_customer || '',
-            addr: p.bundle_addr || ''
+            addr: p.bundle_addr || '',
+            isMixed: isMixed,
+            hasOutbound: !!p.has_outbound || isMixed,
+            hasInbound: !!p.has_inbound || isMixed,
+            outboundItems: outboundItems,
+            outboundContracts: p.outbound_contracts || [],
+            inboundItems: inboundItems,
+            inboundContracts: p.inbound_contracts || [],
+            contractDetails: p.contract_details || []
           };
         }
       } catch(e) {}
@@ -4600,9 +4649,15 @@
               <div>
                 <h3 class="font-black text-slate-900 text-base leading-tight">${r.customer_name || '고객사 미정'}</h3>
                 <div class="flex items-center gap-1.5 pt-0.5 flex-wrap">
-                  <span class="px-2 py-0.5 rounded text-[10px] font-black ${getMobileCategoryBadgeStyle(r.category)}">
-                    ${r.category || '배송'}
-                  </span>
+                  ${(bInfo && bInfo.role === 'master' && bInfo.isMixed) ? `
+                    <span class="px-2 py-0.5 rounded text-[10px] font-black bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-2xs">
+                      🚚출고 + 📦회수 (동시)
+                    </span>
+                  ` : `
+                    <span class="px-2 py-0.5 rounded text-[10px] font-black ${getMobileCategoryBadgeStyle(r.category)}">
+                      ${r.category || '배송'}
+                    </span>
+                  `}
                   ${isQuick ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">⚡ 퀵</span>' : ''}
                   ${isPickup ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">🏢 방문수령</span>' : ''}
                   ${isParcel ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">📮 택배출고</span>' : ''}
@@ -4625,23 +4680,82 @@
               <i class="fa-solid fa-location-dot text-indigo-600 text-xs"></i>
               <span class="break-all">${r.address || '주소지 미등록'}</span>
             </div>
-            ${(bInfo && bInfo.role === 'master' && bInfo.contracts && bInfo.contracts.length > 0) ? `
+            ${(!bInfo || !bInfo.isMixed) && (bInfo && bInfo.role === 'master' && bInfo.contracts && bInfo.contracts.length > 0) ? `
               <div class="text-[10px] font-mono text-purple-700 bg-purple-50/80 p-1.5 rounded-lg border border-purple-200 flex items-center gap-1.5 flex-wrap">
                 <i class="fa-solid fa-file-contract text-purple-600"></i>
                 <span class="font-bold">묶인 계약(${bInfo.contracts.length}건):</span>
                 <span>${bInfo.contracts.join(', ')}</span>
               </div>
             ` : ''}
-            ${(bInfo && bInfo.role === 'master' && bInfo.mergedItems) ? `
+            ${(!bInfo || !bInfo.isMixed) && (bInfo && bInfo.role === 'master' && bInfo.mergedItems) ? `
               <div class="text-[11px] text-purple-900 bg-purple-50/50 p-1.5 rounded-lg border border-purple-100 font-bold pl-2 flex items-center gap-1">
                 <span>📦</span> <span class="font-bold text-purple-950">${bInfo.mergedItems}</span>
               </div>
-            ` : (r.item_info ? `
+            ` : (!bInfo || !bInfo.isMixed) && (r.items || r.item_info) ? `
               <div class="text-[11px] text-slate-600 font-medium pl-4">
-                📦 <span class="font-bold text-slate-800">${r.item_info}</span>
+                📦 <span class="font-bold text-slate-800">${r.items || r.item_info}</span>
               </div>
-            ` : '')}
+            ` : ''}
           </div>
+
+          ${(bInfo && bInfo.role === 'master' && bInfo.isMixed) ? `
+            <!-- 🚨 [출고 + 회수 복합 배송지 전용 대형 알림 배너] -->
+            <div class="p-3 bg-gradient-to-r from-amber-500 via-rose-500 to-amber-600 text-white rounded-2xl shadow-sm space-y-1">
+              <div class="flex items-center gap-1.5 font-black text-xs text-yellow-100 tracking-wide">
+                <i class="fa-solid fa-triangle-exclamation text-base animate-bounce"></i>
+                <span>🚨 [출고 + 회수 동시 진행 배송지]</span>
+              </div>
+              <p class="text-[11.5px] font-bold text-white leading-snug">
+                물품 전달(출고)과 물품 수거(회수)를 <b>둘 다 진행</b>해야 합니다!<br>
+                절대 하나만 처리하고 출발하지 마세요!
+              </p>
+            </div>
+
+            <!-- 2 Big Foolproof Action Cards -->
+            <div class="space-y-2 pt-0.5">
+              <!-- Box 1: 출고/전달 (차에서 내릴 것) -->
+              <div class="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-2xl space-y-2 shadow-xs">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-5 h-5 rounded-md bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">1</span>
+                    <span class="text-xs font-black text-blue-950">🚚 고객에게 줄 것 (출고 / 전달)</span>
+                  </div>
+                  ${bInfo.outboundContracts && bInfo.outboundContracts.length ? `<span class="text-[10px] font-mono font-bold bg-blue-200/80 text-blue-950 px-2 py-0.5 rounded-full border border-blue-300">계약: ${bInfo.outboundContracts.join(', ')}</span>` : ''}
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-blue-200 shadow-2xs space-y-1">
+                  <div class="text-[14px] font-black text-blue-950 flex items-start gap-1.5">
+                    <span class="text-blue-600 shrink-0 text-base">📦</span>
+                    <span class="break-words leading-tight">${bInfo.outboundItems || '출고 물품 확인'}</span>
+                  </div>
+                  <div class="text-[11px] font-bold text-blue-700 flex items-center gap-1 pt-0.5">
+                    <i class="fa-solid fa-arrow-down text-[10px]"></i>
+                    <span>차량 적재함에서 내려 고객에게 전달해 주세요.</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Box 2: 회수/수거 (차에 실을 것) -->
+              <div class="p-3 bg-gradient-to-r from-purple-50 to-fuchsia-50 border-2 border-purple-400 rounded-2xl space-y-2 shadow-xs">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-1.5">
+                    <span class="w-5 h-5 rounded-md bg-purple-600 text-white flex items-center justify-center text-[10px] font-black">2</span>
+                    <span class="text-xs font-black text-purple-950">📦 고객에게서 받을 것 (회수 / 수거)</span>
+                  </div>
+                  ${bInfo.inboundContracts && bInfo.inboundContracts.length ? `<span class="text-[10px] font-mono font-bold bg-purple-200/80 text-purple-950 px-2 py-0.5 rounded-full border border-purple-300">계약: ${bInfo.inboundContracts.join(', ')}</span>` : ''}
+                </div>
+                <div class="bg-white p-3 rounded-xl border border-purple-200 shadow-2xs space-y-1">
+                  <div class="text-[14px] font-black text-purple-950 flex items-start gap-1.5">
+                    <span class="text-purple-600 shrink-0 text-base">💼</span>
+                    <span class="break-words leading-tight">${bInfo.inboundItems || '회수 물품 확인'}</span>
+                  </div>
+                  <div class="text-[11px] font-bold text-purple-700 flex items-center gap-1 pt-0.5">
+                    <i class="fa-solid fa-arrow-up text-[10px]"></i>
+                    <span>고객사로부터 인수받아 차량에 실어 주세요.</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ` : ''}
 
           <!-- Memo -->
           ${r.memo_full ? `
@@ -4661,7 +4775,7 @@
                     <span>🚨 출고 당시 기사 특이사항</span>
                   </span>
                   <span class="text-[9.5px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold border border-amber-300 shadow-2xs">
-                    ${pastInfo.driver_name ? (pastInfo.driver_name + ' 기사 · ') : ''}${pastInfo.delivery_date || '이전 출고'}
+                    ${pastInfo.contract_no ? `[${pastInfo.contract_no}] ` : ''}${pastInfo.driver_name ? (pastInfo.driver_name + ' 기사 · ') : ''}${pastInfo.delivery_date || '이전 출고'}
                   </span>
                 </div>
                 ${pastInfo.issue ? `
@@ -5172,7 +5286,7 @@
       if (pastArea && past && (past.issue || pastPhotoCount > 0)) {
         pastArea.classList.remove('hidden');
         if (pastText) pastText.innerText = past.issue || (pastPhotoCount > 0 ? `[출고 사진 ${pastPhotoCount}장 등록됨]` : '');
-        if (pastAuthor) pastAuthor.innerText = (past.driver_name ? past.driver_name + ' 기사 · ' : '') + (past.delivery_date || '');
+        if (pastAuthor) pastAuthor.innerText = (past.contract_no ? `[${past.contract_no}] ` : '') + (past.driver_name ? past.driver_name + ' 기사 · ' : '') + (past.delivery_date || '');
       } else if (pastArea) {
         pastArea.classList.add('hidden');
       }
@@ -5551,8 +5665,15 @@
         return;
       }
 
-      if (!confirm(`🏁 [${r.customer_name}] 배송지에 도착하셨습니까?\n현재 시각으로 도착 완료가 기록됩니다.`)) {
-        return;
+      var bInfoForArrive = parseMobileBundleInfo(r);
+      if (bInfoForArrive && bInfoForArrive.isMixed) {
+        if (!confirm(`🚨 [출고 + 회수 동시 진행 배송지 확인]\n고객사: ${r.customer_name}\n\n1. 🚚 출고 물품 전달 완료: ${bInfoForArrive.outboundItems || '출고물품'}\n2. 📦 회수 물품 수거 완료: ${bInfoForArrive.inboundItems || '회수물품'}\n\n전달과 수거를 둘 다 완료하셨습니까?\n도착시간 및 완료가 기록됩니다.`)) {
+          return;
+        }
+      } else {
+        if (!confirm(`🏁 [${r.customer_name}] 배송지에 도착하셨습니까?\n현재 시각으로 도착 완료가 기록됩니다.`)) {
+          return;
+        }
       }
 
       var nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });

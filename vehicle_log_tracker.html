@@ -1975,21 +1975,26 @@
             // ────────────────────────────────────────────────────────────────
             // [실시간 연동] 당월 배송 스케줄에서 출발·도착 시각 및 주소 자동 동기화
             // ────────────────────────────────────────────────────────────────
-            try {
-              var schRes = await supabaseClient.from('delivery_schedules')
-                .select('*')
-                .gte('delivery_date', `${monthPrefix}-01`)
-                .lte('delivery_date', `${monthPrefix}-31`)
-                .neq('source_sheet', 'VEHICLE_TRIP_LOGS')
-                .neq('source_sheet', 'SYSTEM_CONFIG_VEHICLES')
-                .neq('source_sheet', 'SYSTEM_CONFIG_USERS')
-                .neq('source_sheet', 'AS_RECORDS')
-                .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
-                .neq('contract_no', 'HANDOVER_CONFIG');
+            var _nowForSync = new Date();
+            var isCurrentOrFutureMonth = (currentYear > _nowForSync.getFullYear() || (currentYear === _nowForSync.getFullYear() && currentMonth >= (_nowForSync.getMonth() + 1)));
+            if (isCurrentOrFutureMonth) {
+              try {
+                var schRes = await supabaseClient.from('delivery_schedules')
+                  .select('id, delivery_date, driver_name, customer_name, address, items, delivery_method, category, memo_special, memo_full, stop_order, status, visit_time, source_sheet, contract_no')
+                  .gte('delivery_date', monthPrefix + '-01')
+                  .lte('delivery_date', monthPrefix + '-31');
 
-              var liveSchedules = schRes.data || [];
-              schedulesCache = liveSchedules;
-              globalSubBundleIds.clear();
+                var rawSchedules = schRes.data || [];
+                var liveSchedules = rawSchedules.filter(function(s) {
+                  if (!s.source_sheet) return true;
+                  if (s.source_sheet === 'VEHICLE_TRIP_LOGS') return false;
+                  if (s.source_sheet === 'AS_RECORDS') return false;
+                  if (s.source_sheet.startsWith('SYSTEM_CONFIG_')) return false;
+                  if (s.contract_no === 'HANDOVER_CONFIG') return false;
+                  return true;
+                });
+                schedulesCache = liveSchedules;
+                globalSubBundleIds.clear();
               liveSchedules.forEach(function(ls) {
                 if (ls.memo_special) {
                   try {
@@ -2103,7 +2108,7 @@
                             if (parsedSp.arrive) arr = parsedSp.arrive;
                             if (parsedSp.bundle_role === 'master') {
                               isMaster = true;
-                              bCount = parsedSp.bundle_count || 1;
+                              bCount = parsedSp.bundle_count || (parsedSp.bundle_sub_ids ? parsedSp.bundle_sub_ids.length + 1 : (parsedSp.bundle_contracts ? parsedSp.bundle_contracts.length : 2));
                             }
                           } catch(e) {
                             var dM = matchedDs.memo_special.match(/출발[:\s]*(\d{1,2}:\d{2})/);
@@ -2279,8 +2284,9 @@
                 }
               });
             } catch(syncErr) {
-              console.warn('Live schedules stop sync error:', syncErr);
-            }
+                console.warn('Live schedules stop sync error:', syncErr);
+              }
+            } // end if (isCurrentOrFutureMonth)
           }
         }
       } catch(e) {

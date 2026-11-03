@@ -618,6 +618,7 @@
           <option value="all">전체 구분</option>
           <option value="배송">배송</option>
           <option value="회수">회수</option>
+          <option value="배송+회수">🚚출고+📦회수 (동시)</option>
           <option value="교환출고">교환출고</option>
           <option value="설치">설치</option>
           <option value="수령">수령</option>
@@ -650,6 +651,31 @@
         <button onclick="openAddStopModal()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition flex items-center gap-1.5 shadow-sm text-xs">
           <i class="fa-solid fa-plus"></i>
           <span>배송지 직접 추가</span>
+        </button>
+      </div>
+    </div>
+
+        <!-- Same Address Smart Bundling Banner (동일 주소 자동 감지 배너) -->
+    <div id="sameAddressBundleBanner" class="hidden bg-gradient-to-r from-purple-50 via-indigo-50/80 to-blue-50 border border-purple-200/90 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2.5 shadow-xs transition animate-in fade-in duration-200">
+      <div class="flex items-center gap-3">
+        <span class="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-black shadow-xs shrink-0">
+          <i class="fa-solid fa-wand-magic-sparkles text-sm"></i>
+        </span>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="font-black text-purple-950 text-xs flex items-center gap-1.5">
+              <span>동일 주소 배송 자동 감지</span>
+              <span class="w-1.5 h-1.5 rounded-full bg-purple-500 animate-pulse"></span>
+            </span>
+            <span id="sameAddrCandidateBadge" class="px-2 py-0.5 bg-purple-200 text-purple-900 rounded-full font-black text-[10.5px]"></span>
+          </div>
+          <p id="sameAddrCandidateSummary" class="text-[11px] text-slate-600 font-medium mt-0.5"></p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" onclick="openSameAddressBundleModal()" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-bold rounded-xl transition shadow-xs flex items-center gap-1.5 text-xs cursor-pointer">
+          <i class="fa-solid fa-link"></i>
+          <span>동일 주소 묶음 검토 및 실행</span>
         </button>
       </div>
     </div>
@@ -840,6 +866,48 @@
 
   <!-- Hidden Container for Native Window Print -->
   <div id="printManifestContainer" class="hidden"></div>
+
+    <!-- Same Address Smart Bundling Modal (동일 주소 지능형 묶음 모달) -->
+  <div id="sameAddressBundleModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50" onclick="if(event.target===this)closeSameAddressBundleModal()">
+    <div class="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 space-y-4 max-h-[90vh] flex flex-col animate-in fade-in zoom-in-95 duration-150">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 class="font-black text-sm text-slate-900 flex items-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles text-purple-600"></i> 동일 주소 배송 지능형 묶기
+        </h3>
+        <button onclick="closeSameAddressBundleModal()" class="text-slate-400 hover:text-slate-600 text-base">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+
+      <div class="bg-purple-50/80 border border-purple-100 rounded-xl p-3 space-y-1 text-xs text-purple-950 shrink-0">
+        <p class="font-bold flex items-center gap-1.5 text-purple-700">
+          <i class="fa-solid fa-circle-info"></i> 동일 배송지 자동 묶음 안내
+        </p>
+        <p class="text-[11px] text-slate-600">
+          계약번호나 품목이 다르더라도 배송일자와 목적지 주소가 같은 건들을 1건으로 묶습니다. <b>동일 품목 수량이 자동 합산</b>되며, <b>법인차량 운행일지에서도 1곳의 경유지(Stop)</b>로 통합 집계됩니다.
+        </p>
+      </div>
+
+      <div id="sameAddressBundleListContainer" class="flex-1 overflow-y-auto custom-scroll space-y-3 pr-1 min-h-[160px]">
+        <!-- Candidate groups rendered here -->
+      </div>
+
+      <div class="border-t border-slate-100 pt-3 flex items-center justify-between shrink-0">
+        <div class="text-xs text-slate-600 font-medium">
+          선택된 배송지: <b id="sameAddressBundleSelectedCount" class="text-purple-700 font-black">0</b>곳
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeSameAddressBundleModal()" class="px-3.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition cursor-pointer">
+            닫기
+          </button>
+          <button type="button" id="sameAddressBundleExecuteBtn" onclick="executeSameAddressBundling()" class="px-4 py-1.5 bg-purple-600 hover:bg-purple-700 active:bg-purple-800 text-white font-bold rounded-xl text-xs transition shadow-sm flex items-center gap-1.5 cursor-pointer">
+            <i class="fa-solid fa-link"></i>
+            <span>선택한 배송지 일괄 묶기 실행</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- CSV Upload Modal -->
   <div id="csvModal" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm hidden flex items-center justify-center p-4 z-50" onclick="if(event.target===this)closeCsvModal()">
@@ -1038,6 +1106,7 @@
             <select id="editType" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-semibold">
               <option value="배송">배송</option>
               <option value="회수">회수</option>
+              <option value="배송+회수">배송+회수</option>
               <option value="설치">설치</option>
               <option value="수령">수령</option>
               <option value="A/S">A/S</option>
@@ -3114,7 +3183,7 @@
     }
 
     const DRIVER_LIST = ['김승지', '조경찬', '박종환', '최두성', '이성호', '장종순', '방문수령', '퀵', '택배'];
-    const CATEGORY_LIST = ['배송', '회수', '교환출고', '설치', '수령', 'A/S'];
+    const CATEGORY_LIST = ['배송', '회수', '배송+회수', '교환출고', '설치', '수령', 'A/S'];
 
     // 시스템 내 모든 등록 유저 및 기사 목록 취합 헬퍼
     function getAllAvailableDrivers() {
@@ -4517,7 +4586,7 @@
         return r.구분 !== 'mid_return' && r.category !== 'mid_return' && (!r.고객사 || r.고객사.indexOf('(중간 복귀)') === -1);
       });
       document.getElementById('kpiTotal').innerText = realDeliveries.length;
-      var delCount = realDeliveries.filter(function(r) { return (r.구분 || '').indexOf('회수') === -1; }).length;
+      var delCount = realDeliveries.filter(function(r) { return (r.구분 || '').indexOf('회수') === -1 || (r.구분 || '').indexOf('배송+회수') !== -1; }).length;
       var recCount = realDeliveries.filter(function(r) { return (r.구분 || '').indexOf('회수') !== -1; }).length;
 
       document.getElementById('kpiDelivery').innerText = delCount;
@@ -6178,7 +6247,7 @@
     async function renderRouteMap(options) {
       options = options || {};
       var fitBounds = (options.fitBounds !== false); // 기본값 true, 백그라운드 동기화 시 false
-      var activeRecords = getFilteredRecords();
+      var activeRecords = getFilteredRecords().filter(function(r) { var b = parseBundleInfo(r); return !b || b.role !== 'sub'; });
       var timelineBox = document.getElementById('routeTimeline');
       var prevScrollTop = timelineBox ? timelineBox.scrollTop : 0;
       document.getElementById('timelineCount').innerText = activeRecords.length;
@@ -8126,6 +8195,7 @@
     // Master Table & Inline Driver Assignment
     // ==========================================
     function getCategoryBadgeStyle(cat) {
+      if (cat === '배송+회수' || cat === '출고+회수') return 'bg-gradient-to-r from-blue-50 to-purple-50 text-indigo-900 border-indigo-300 font-black';
       if (cat === '배송') return 'bg-blue-50 text-blue-700 border-blue-200';
       if (cat === '회수') return 'bg-purple-50 text-purple-700 border-purple-200';
       if (cat === '교환출고' || (cat && cat.indexOf('교환') !== -1)) return 'bg-indigo-50 text-indigo-700 border-indigo-300 font-black';
@@ -8203,10 +8273,20 @@
         var isDriverUser = (currentUser && currentUser.role === 'driver');
         var isMyRecord = (!isDriverUser || (r.담당기사 || '').trim() === currentUser.id);
         var isMidRow = (r.구분 === 'mid_return' || r.category === 'mid_return' || (r.고객사 && r.고객사.indexOf('(중간 복귀)') !== -1));
+        var bInfo = parseBundleInfo(r);
+        var isMixedBundle = (bInfo && bInfo.role === 'master' && bInfo.isMixed);
 
-        // 구분 인라인 셀렉트 (배송, 회수, 설치, 수령, A/S)
+        // 구분 인라인 셀렉트 (배송, 회수, 설치, 수령, A/S, 배송+회수)
         var categorySelectHtml = isMidRow
           ? `<span class="py-1 px-2 rounded-lg text-xs font-black bg-purple-100 text-purple-800 border border-purple-300">🏢 중간 복귀</span>`
+          : isMixedBundle
+          ? `
+            <button type="button" onclick="openBundleDetailModal(${r.ID})" class="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-black bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-xs hover:opacity-90 transition cursor-pointer" title="출고와 회수가 동시에 진행되는 묶음 배송입니다 (클릭 시 상세 계약 확인)">
+              <span class="text-blue-100">🚚출고</span>
+              <span class="text-white/60">+</span>
+              <span class="text-purple-100">📦회수</span>
+            </button>
+          `
           : `
           <select ${isDriverUser ? 'disabled' : `onchange="onInlineCategoryChange(${realIdx}, this.value)"`} class="py-1 px-2 rounded-lg text-xs font-bold border focus:outline-none ${isDriverUser ? 'cursor-default opacity-90' : 'cursor-pointer'} ${getCategoryBadgeStyle(r.구분)}">
             ${CATEGORY_LIST.map(function(c) {
@@ -8329,7 +8409,34 @@
           </td>
           <td class="py-2.5 px-3.5 text-slate-600 max-w-xs truncate" title="${r.주소}">${r.주소}</td>
           <td class="py-2.5 px-2.5 text-slate-600 font-bold">${r.방문시간 || '-'}</td>
-          <td class="py-2.5 px-3 text-slate-800 font-semibold max-w-xs truncate" title="${r.품목_수량}">${r.품목_수량 || '-'}</td>
+          ${(function() {
+            if (isMixedBundle) {
+              return `
+                <td class="py-2 px-3">
+                  <div class="flex flex-col gap-1 max-w-sm">
+                    <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 border border-blue-200 text-blue-900 text-xs font-bold shadow-2xs" title="고객 전달 물품 (출고)">
+                      <span class="bg-blue-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded shrink-0">🚚 출고</span>
+                      <span class="font-bold text-blue-950 truncate">${bInfo.outboundItems || '-'}</span>
+                      ${bInfo.outboundContracts && bInfo.outboundContracts.length ? `<span class="text-[9.5px] text-blue-600 font-mono shrink-0">(${bInfo.outboundContracts.join(',')})</span>` : ''}
+                    </div>
+                    <div class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-purple-50 border border-purple-200 text-purple-900 text-xs font-bold shadow-2xs" title="고객 수거 물품 (회수)">
+                      <span class="bg-purple-600 text-white text-[9px] font-black px-1.5 py-0.2 rounded shrink-0">📦 회수</span>
+                      <span class="font-bold text-purple-950 truncate">${bInfo.inboundItems || '-'}</span>
+                      ${bInfo.inboundContracts && bInfo.inboundContracts.length ? `<span class="text-[9.5px] text-purple-600 font-mono shrink-0">(${bInfo.inboundContracts.join(',')})</span>` : ''}
+                    </div>
+                  </div>
+                </td>
+              `;
+            } else if (bInfo && bInfo.role === 'master') {
+              return `
+                <td class="py-2.5 px-3 text-slate-800 font-semibold max-w-xs truncate" title="${r.품목_수량}">
+                  <span class="text-purple-700 font-bold text-xs">[묶음합산]</span>
+                  <span>${r.품목_수량 || '-'}</span>
+                </td>
+              `;
+            }
+            return `<td class="py-2.5 px-3 text-slate-800 font-semibold max-w-xs truncate" title="${r.품목_수량}">${r.품목_수량 || '-'}</td>`;
+          })()}
           <td class="py-2 px-2">
             ${memoInputHtml}
             ${times.issue ? `
@@ -8511,6 +8618,9 @@
 
       // 체크박스 상태 갱신
       onRowCheckboxChange();
+      if (typeof updateSameAddressBundleBanner === 'function') {
+        updateSameAddressBundleBanner();
+      }
     }
 
     // ==========================================
@@ -9350,6 +9460,18 @@
     // ==========================================
     // Delivery Bundle & Merge Engine (동일 배송지 묶음 합치기)
     // ==========================================
+    function isDeliveryCategory(cat) {
+      if (!cat) return true;
+      var c = String(cat).trim();
+      return c === '배송' || c === '출고' || c === '설치' || c === '교환출고';
+    }
+
+    function isRecoveryCategory(cat) {
+      if (!cat) return false;
+      var c = String(cat).trim();
+      return c === '회수' || c === '반납' || c === '교환회수' || c === '수거';
+    }
+
     function parseBundleInfo(r) {
       if (!r) return null;
       var raw = r.추후일정_특이사항 || r.memo_special || '';
@@ -9357,16 +9479,37 @@
       try {
         var p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
         if (p && (p.bundle_id || p.bundle_role)) {
+          var isMixed = !!p.is_mixed || (r.구분 === '배송+회수' || r.category === '배송+회수') || ((p.merged_items || '').indexOf('[출고') !== -1 && (p.merged_items || '').indexOf('[회수') !== -1);
+          var outboundItems = p.outbound_items || '';
+          var inboundItems = p.inbound_items || '';
+          if (!outboundItems && isMixed && p.merged_items) {
+            var mOut = p.merged_items.match(/\[출고(?:\/전달)?\]\s*([^|]+)/);
+            if (mOut) outboundItems = mOut[1].trim();
+          }
+          if (!inboundItems && isMixed && p.merged_items) {
+            var mIn = p.merged_items.match(/\[회수(?:\/수거)?\]\s*([^|]+)/);
+            if (mIn) inboundItems = mIn[1].trim();
+          }
           return {
             id: p.bundle_id,
             role: p.bundle_role, // 'master' | 'sub'
+            count: p.bundle_count || (p.bundle_sub_ids ? p.bundle_sub_ids.length + 1 : (p.bundle_contracts ? p.bundle_contracts.length : 2)),
             masterId: p.bundle_master_id,
             subIds: p.bundle_sub_ids || [],
             contracts: p.bundle_contracts || [],
             originalItems: p.original_items || '',
+            originalCategory: p.original_category || '',
             mergedItems: p.merged_items || '',
             customer: p.bundle_customer || '',
-            addr: p.bundle_addr || ''
+            addr: p.bundle_addr || '',
+            isMixed: isMixed,
+            hasOutbound: !!p.has_outbound || isMixed,
+            hasInbound: !!p.has_inbound || isMixed,
+            outboundItems: outboundItems,
+            outboundContracts: p.outbound_contracts || [],
+            inboundItems: inboundItems,
+            inboundContracts: p.inbound_contracts || [],
+            contractDetails: p.contract_details || []
           };
         }
       } catch(e) {}
@@ -9418,6 +9561,88 @@
       });
 
       return resultParts.join(' , ');
+    }
+
+    function analyzeBundleCategoriesAndItems(recordsList) {
+      var outboundRecs = [];
+      var inboundRecs = [];
+      var otherRecs = [];
+
+      recordsList.forEach(function(r) {
+        var cat = (r.구분 || r.category || '배송').trim();
+        if (isRecoveryCategory(cat)) {
+          inboundRecs.push(r);
+        } else if (isDeliveryCategory(cat)) {
+          outboundRecs.push(r);
+        } else {
+          otherRecs.push(r);
+        }
+      });
+
+      var hasOutbound = outboundRecs.length > 0;
+      var hasInbound = inboundRecs.length > 0;
+      var isMixed = hasOutbound && hasInbound;
+
+      var outboundItems = combineDeliveryItems(outboundRecs.map(function(r) { return r.품목_수량 || r.items || ''; }));
+      var inboundItems = combineDeliveryItems(inboundRecs.map(function(r) { return r.품목_수량 || r.items || ''; }));
+      var otherItems = combineDeliveryItems(otherRecs.map(function(r) { return r.품목_수량 || r.items || ''; }));
+
+      var outboundContracts = outboundRecs.map(function(r) { return r.계약번호 || r.contract_no || '-'; }).filter(Boolean);
+      var inboundContracts = inboundRecs.map(function(r) { return r.계약번호 || r.contract_no || '-'; }).filter(Boolean);
+      var otherContracts = otherRecs.map(function(r) { return r.계약번호 || r.contract_no || '-'; }).filter(Boolean);
+
+      var mergedItems = '';
+      if (isMixed) {
+        var parts = [];
+        if (outboundItems) parts.push('🚚 [출고] ' + outboundItems);
+        if (inboundItems) parts.push('📦 [회수] ' + inboundItems);
+        if (otherItems) parts.push('⚙️ [기타] ' + otherItems);
+        mergedItems = parts.join('  |  ');
+      } else {
+        var allItemsRaw = recordsList.map(function(r) { return r.품목_수량 || r.items || ''; });
+        mergedItems = combineDeliveryItems(allItemsRaw);
+      }
+
+      var bundleCategory = '배송';
+      if (isMixed) {
+        bundleCategory = '배송+회수';
+      } else if (hasInbound && !hasOutbound) {
+        bundleCategory = '회수';
+      } else if (hasOutbound && !hasInbound) {
+        bundleCategory = outboundRecs[0].구분 || outboundRecs[0].category || '배송';
+      } else if (recordsList[0]) {
+        bundleCategory = recordsList[0].구분 || recordsList[0].category || '배송';
+      }
+
+      var contractDetails = recordsList.map(function(r) {
+        var cNo = r.계약번호 || r.contract_no || '-';
+        var cat = (r.구분 || r.category || '배송').trim();
+        var itm = r.품목_수량 || r.items || '-';
+        var isRec = isRecoveryCategory(cat);
+        return {
+          contract: cNo,
+          category: cat,
+          type: isRec ? 'inbound' : 'outbound',
+          actionLabel: isRec ? '고객에게서 받을 것 (회수/수거)' : '고객에게 줄 것 (출고/전달)',
+          actionIcon: isRec ? '📦' : '🚚',
+          items: itm
+        };
+      });
+
+      return {
+        isMixed: isMixed,
+        hasOutbound: hasOutbound,
+        hasInbound: hasInbound,
+        category: bundleCategory,
+        mergedItems: mergedItems,
+        outboundItems: outboundItems,
+        outboundContracts: outboundContracts,
+        inboundItems: inboundItems,
+        inboundContracts: inboundContracts,
+        otherItems: otherItems,
+        otherContracts: otherContracts,
+        contractDetails: contractDetails
+      };
     }
 
     async function mergeSelectedDeliveries() {
@@ -9506,9 +9731,9 @@
       var masterRecord = selectedRecords[0];
       var subRecords = selectedRecords.slice(1);
       var allContracts = selectedRecords.map(function(r) { return r.계약번호 || '-'; });
-      var allItemsRaw = selectedRecords.map(function(r) { return r.품목_수량 || ''; });
-      var mergedItems = combineDeliveryItems(allItemsRaw);
       var subIds = subRecords.map(function(r) { return r.ID; });
+
+      var analysis = analyzeBundleCategoriesAndItems(selectedRecords);
 
       var masterSpecialObj = {};
       if (masterRecord.추후일정_특이사항) {
@@ -9518,15 +9743,27 @@
       masterSpecialObj.bundle_role = 'master';
       masterSpecialObj.bundle_sub_ids = subIds;
       masterSpecialObj.bundle_contracts = allContracts;
+      masterSpecialObj.bundle_count = allContracts.length;
       masterSpecialObj.bundle_customer = masterRecord.고객사;
       masterSpecialObj.bundle_addr = masterRecord.주소;
       masterSpecialObj.original_items = masterRecord.품목_수량 || '';
-      masterSpecialObj.merged_items = mergedItems;
+      masterSpecialObj.original_category = masterRecord.구분 || masterRecord.category || '배송';
+      masterSpecialObj.merged_items = analysis.mergedItems;
+      masterSpecialObj.is_mixed = analysis.isMixed;
+      masterSpecialObj.has_outbound = analysis.hasOutbound;
+      masterSpecialObj.has_inbound = analysis.hasInbound;
+      masterSpecialObj.outbound_items = analysis.outboundItems;
+      masterSpecialObj.outbound_contracts = analysis.outboundContracts;
+      masterSpecialObj.inbound_items = analysis.inboundItems;
+      masterSpecialObj.inbound_contracts = analysis.inboundContracts;
+      masterSpecialObj.contract_details = analysis.contractDetails;
       masterSpecialObj.bundled_at = new Date().toISOString();
 
       // 1. 로컬 메모리 상태 즉각 반영 (0.1초 즉시 반응)
-      masterRecord.품목_수량 = mergedItems;
-      masterRecord.items = mergedItems;
+      masterRecord.품목_수량 = analysis.mergedItems;
+      masterRecord.items = analysis.mergedItems;
+      masterRecord.구분 = analysis.category;
+      masterRecord.category = analysis.category;
       masterRecord.추후일정_특이사항 = JSON.stringify(masterSpecialObj);
       masterRecord.memo_special = JSON.stringify(masterSpecialObj);
 
@@ -9552,7 +9789,8 @@
 
       try {
         var masterPayload = {
-          items: mergedItems,
+          items: analysis.mergedItems,
+          category: analysis.category,
           memo_special: JSON.stringify(masterSpecialObj)
         };
         var mRes = await supabaseClient.from('delivery_schedules').update(masterPayload).eq('id', masterRecord.ID);
@@ -9614,18 +9852,32 @@
         try { masterSpecialObj = JSON.parse(masterRecord.추후일정_특이사항); } catch(e) {}
       }
       var origItems = masterSpecialObj.original_items || masterRecord.품목_수량;
+      var origCategory = masterSpecialObj.original_category || (bInfo.isMixed ? '회수' : masterRecord.구분);
+
       delete masterSpecialObj.bundle_id;
       delete masterSpecialObj.bundle_role;
+      delete masterSpecialObj.bundle_count;
       delete masterSpecialObj.bundle_sub_ids;
       delete masterSpecialObj.bundle_contracts;
       delete masterSpecialObj.bundle_customer;
       delete masterSpecialObj.bundle_addr;
       delete masterSpecialObj.original_items;
+      delete masterSpecialObj.original_category;
       delete masterSpecialObj.merged_items;
+      delete masterSpecialObj.is_mixed;
+      delete masterSpecialObj.has_outbound;
+      delete masterSpecialObj.has_inbound;
+      delete masterSpecialObj.outbound_items;
+      delete masterSpecialObj.outbound_contracts;
+      delete masterSpecialObj.inbound_items;
+      delete masterSpecialObj.inbound_contracts;
+      delete masterSpecialObj.contract_details;
       delete masterSpecialObj.bundled_at;
 
       masterRecord.품목_수량 = origItems;
       masterRecord.items = origItems;
+      masterRecord.구분 = origCategory;
+      masterRecord.category = origCategory;
       masterRecord.추후일정_특이사항 = JSON.stringify(masterSpecialObj);
       masterRecord.memo_special = JSON.stringify(masterSpecialObj);
 
@@ -9654,6 +9906,7 @@
       try {
         var mRes = await supabaseClient.from('delivery_schedules').update({
           items: origItems,
+          category: origCategory,
           memo_special: JSON.stringify(masterSpecialObj)
         }).eq('id', masterId);
         if (mRes.error) throw mRes.error;
@@ -9698,30 +9951,63 @@
 
       var html = `
         <div class="text-left space-y-3 text-xs">
-          <div class="p-2.5 bg-purple-50 rounded-xl border border-purple-200">
-            <div class="font-black text-purple-900 text-sm flex items-center gap-1.5">
-              <i class="fa-solid fa-link text-purple-600"></i>
-              <span>${masterRecord.고객사} (총 ${allRecs.length}건 묶음 배송)</span>
+          <div class="p-3 bg-purple-50 rounded-xl border border-purple-200 space-y-1.5">
+            <div class="flex items-center justify-between gap-2">
+              <span class="font-black text-purple-950 text-sm flex items-center gap-1.5">
+                <i class="fa-solid fa-link text-purple-600"></i>
+                <span>${masterRecord.고객사} (총 ${allRecs.length}건 묶음 배송)</span>
+              </span>
+              ${bInfo.isMixed ? `<span class="px-2 py-0.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md text-[10px] font-black shadow-2xs">🚚출고 + 📦회수 동시</span>` : ''}
             </div>
-            <div class="text-slate-600 text-xs mt-1"><i class="fa-solid fa-location-dot text-slate-400"></i> ${masterRecord.주소}</div>
-            <div class="text-slate-800 font-bold mt-1.5 bg-white p-2 rounded-lg border border-purple-100">
-              <span class="text-purple-700 font-black">[통합 품목]</span> ${bInfo.mergedItems || masterRecord.품목_수량}
-            </div>
+            <div class="text-slate-600 text-xs"><i class="fa-solid fa-location-dot text-slate-400"></i> ${masterRecord.주소}</div>
           </div>
 
-          <div class="space-y-1.5">
+          ${bInfo.isMixed ? `
+            <div class="space-y-2">
+              <div class="p-2.5 bg-blue-50/90 border border-blue-200 rounded-xl space-y-1">
+                <div class="text-xs font-black text-blue-950 flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-blue-600 text-white flex items-center justify-center text-[9px]">1</span>
+                  <span>🚚 고객에게 줄 것 (출고 / 전달)</span>
+                  ${bInfo.outboundContracts ? `<span class="text-[9.5px] font-mono text-blue-700 ml-auto">계약: ${bInfo.outboundContracts.join(', ')}</span>` : ''}
+                </div>
+                <div class="bg-white p-2 rounded-lg border border-blue-100 font-black text-blue-950 text-xs">
+                  ${bInfo.outboundItems || '출고 품목'}
+                </div>
+              </div>
+
+              <div class="p-2.5 bg-purple-50/90 border border-purple-200 rounded-xl space-y-1">
+                <div class="text-xs font-black text-purple-950 flex items-center gap-1.5">
+                  <span class="w-4 h-4 rounded bg-purple-600 text-white flex items-center justify-center text-[9px]">2</span>
+                  <span>📦 고객에게서 받을 것 (회수 / 수거)</span>
+                  ${bInfo.inboundContracts ? `<span class="text-[9.5px] font-mono text-purple-700 ml-auto">계약: ${bInfo.inboundContracts.join(', ')}</span>` : ''}
+                </div>
+                <div class="bg-white p-2 rounded-lg border border-purple-100 font-black text-purple-950 text-xs">
+                  ${bInfo.inboundItems || '회수 품목'}
+                </div>
+              </div>
+            </div>
+          ` : `
+            <div class="text-slate-800 font-bold bg-purple-50/60 p-2.5 rounded-xl border border-purple-200 text-xs">
+              <span class="text-purple-700 font-black">[통합 품목]</span> ${bInfo.mergedItems || masterRecord.품목_수량}
+            </div>
+          `}
+
+          <div class="space-y-1.5 pt-1">
             <div class="font-bold text-slate-600 text-[11px]">개별 계약 상세 내역:</div>
             ${allRecs.map(function(rec, idx) {
               var isM = (idx === 0);
+              var cat = (rec.구분 || rec.category || '배송').trim();
+              var isRec = isRecoveryCategory(cat);
               return `
                 <div class="p-2 bg-slate-50 rounded-xl border border-slate-200 flex items-start justify-between gap-2">
                   <div class="min-w-0 flex-1">
-                    <div class="flex items-center gap-1.5">
+                    <div class="flex items-center gap-1.5 flex-wrap">
                       <span class="px-1.5 py-0.5 rounded text-[9.5px] font-black ${isM ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-slate-200 text-slate-700'}">${isM ? '대표 마스터' : '묶음 서브'}</span>
                       <span class="font-mono font-bold text-indigo-700">${rec.계약번호 || '계약번호 없음'}</span>
-                      <span class="text-slate-500 font-medium">(${rec.구분 || '배송'} / ${rec.배송방법 || '직배송'})</span>
+                      <span class="px-1.5 py-0.2 rounded text-[9.5px] font-black ${isRec ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${cat}</span>
+                      <span class="text-slate-500 font-medium text-[10px]">(${rec.배송방법 || '직배송'})</span>
                     </div>
-                    <div class="text-slate-700 font-medium mt-1 truncate">품목: ${rec.품목_수량 || '-'}</div>
+                    <div class="text-slate-800 font-bold mt-1 text-xs truncate">품목: ${rec.품목_수량 || '-'}</div>
                     ${rec.비고_전문 ? `<div class="text-amber-800 text-[10.5px] mt-0.5 truncate">비고: ${rec.비고_전문}</div>` : ''}
                   </div>
                 </div>
@@ -9744,6 +10030,311 @@
           unmergeDeliveryBundle(masterId);
         }
       });
+    }
+
+    
+    // ==========================================
+    // Smart Same-Address Auto-Bundling Engine
+    // ==========================================
+    function normalizeRoadAddressForBundle(addr) {
+      var s = String(addr || '').trim();
+      if (!s) return '';
+      var sClean = s.replace(/\([^)]*\)/g, ' ').replace(/\s+/g, ' ').trim();
+      var m = sClean.match(/([가-힣]+(?:시|도)\s+)?([가-힣]+(?:시|군|구)\s+)?([가-힣0-9]+(?:로|길|대로|가)\s*\d+(?:-\d+)?)/);
+      if (m) {
+        var prefix = (m[2] || m[1] || '').trim();
+        var road = (m[3] || '').trim().replace(/\s+/g, '');
+        return prefix ? (prefix + ' ' + road) : road;
+      }
+      return sClean.replace(/\s+/g, '').slice(0, 18);
+    }
+
+    var _cachedSameAddressCandidates = [];
+
+    function findSameAddressBundleCandidates() {
+      if (!records || records.length === 0) return [];
+      
+      var active = records.filter(function(r) {
+        if (typeof isExcludedConfigRow === 'function' && isExcludedConfigRow(r, true)) return false;
+        if (r.구분 === 'mid_return' || r.category === 'mid_return') return false;
+        if (r.고객사 && r.고객사.indexOf('(중간 복귀)') !== -1) return false;
+        if (r.계약번호 === 'INTERNAL_RETURN') return false;
+        return true;
+      });
+
+      var groupsByAddr = new Map();
+      active.forEach(function(r) {
+        var bInfo = parseBundleInfo(r);
+        var addr = (r.주소 || '').trim();
+        var normKey = normalizeRoadAddressForBundle(addr);
+        if (!normKey || normKey.length < 3) return;
+
+        if (!groupsByAddr.has(normKey)) {
+          groupsByAddr.set(normKey, []);
+        }
+        groupsByAddr.get(normKey).push({ record: r, bundleInfo: bInfo });
+      });
+
+      var candidates = [];
+      groupsByAddr.forEach(function(items, normKey) {
+        if (items.length < 2) return;
+        
+        var bundleIds = new Set(items.map(function(it) {
+          return it.bundleInfo ? it.bundleInfo.id : null;
+        }));
+        
+        var hasUnbundled = items.some(function(it) { return !it.bundleInfo || !it.bundleInfo.role; });
+        if (hasUnbundled || bundleIds.size > 1) {
+          candidates.push({
+            normKey: normKey,
+            displayAddr: items[0].record.주소 || normKey,
+            customerNames: Array.from(new Set(items.map(function(it) { return (it.record.고객사 || '').trim(); }).filter(Boolean))),
+            items: items.map(function(it) { return it.record; })
+          });
+        }
+      });
+
+      _cachedSameAddressCandidates = candidates;
+      return candidates;
+    }
+
+    function updateSameAddressBundleBanner() {
+      var banner = document.getElementById('sameAddressBundleBanner');
+      if (!banner) return;
+      var badge = document.getElementById('sameAddrCandidateBadge');
+      var summary = document.getElementById('sameAddrCandidateSummary');
+
+      var candidates = findSameAddressBundleCandidates();
+      if (!candidates || candidates.length === 0) {
+        banner.classList.add('hidden');
+        return;
+      }
+
+      var totalRecords = candidates.reduce(function(acc, c) { return acc + c.items.length; }, 0);
+      if (badge) badge.innerText = `${candidates.length}곳 (총 ${totalRecords}건)`;
+      if (summary) {
+        var sampleCust = candidates.slice(0, 2).map(function(c) { return c.customerNames.join('/') || '고객사'; }).join(', ');
+        summary.innerHTML = `목적지 주소가 같은 <b>${sampleCust}</b> 등 ${candidates.length}개 배송지(${totalRecords}건)가 감지되었습니다. 1클릭으로 품목을 자동 합산하고 묶음 처리하세요.`;
+      }
+      banner.classList.remove('hidden');
+    }
+
+    function openSameAddressBundleModal() {
+      var modal = document.getElementById('sameAddressBundleModal');
+      var container = document.getElementById('sameAddressBundleListContainer');
+      if (!modal || !container) return;
+
+      var candidates = findSameAddressBundleCandidates();
+      if (!candidates || candidates.length === 0) {
+        if (typeof Swal !== 'undefined') {
+          Swal.fire('동일 주소 배송 없음', '현재 선택된 날짜에 묶을 수 있는 동일 주소 배송 건이 없습니다.', 'info');
+        } else {
+          alert('현재 선택된 날짜에 묶을 수 있는 동일 주소 배송 건이 없습니다.');
+        }
+        return;
+      }
+
+      container.innerHTML = candidates.map(function(cand, idx) {
+        var analysis = analyzeBundleCategoriesAndItems(cand.items);
+        var custDisplay = cand.customerNames.join(' / ');
+
+        return `
+          <div class="p-3.5 bg-slate-50 hover:bg-purple-50/40 rounded-xl border ${analysis.isMixed ? 'border-purple-300 ring-1 ring-purple-300/50' : 'border-slate-200'} transition space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <label class="flex items-center gap-2 cursor-pointer font-bold text-slate-900 text-xs flex-wrap">
+                <input type="checkbox" class="same-addr-group-cb w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer" data-idx="${idx}" checked onchange="updateSameAddressBundleSelectedCount()">
+                <span class="text-purple-900 font-black">[배송지 ${idx + 1}]</span>
+                <span>${custDisplay}</span>
+                <span class="px-2 py-0.5 bg-purple-100 text-purple-800 rounded-full text-[10px] font-black border border-purple-200">${cand.items.length}건 묶음</span>
+                ${analysis.isMixed ? `<span class="px-2 py-0.5 bg-gradient-to-r from-blue-600 to-purple-600 text-white rounded-md text-[9.5px] font-black shadow-2xs">🚚출고 + 📦회수 동시</span>` : ''}
+              </label>
+              <span class="text-[11px] text-slate-500 font-mono truncate max-w-[220px]" title="${cand.displayAddr}">${cand.displayAddr}</span>
+            </div>
+
+            <!-- Detail Breakdown -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 text-xs pt-1">
+              <div class="p-2 bg-white rounded-lg border border-slate-200 space-y-1">
+                <div class="text-[10px] font-bold text-slate-400">개별 계약 내역:</div>
+                ${cand.items.map(function(it) {
+                  var cat = (it.구분 || it.category || '배송').trim();
+                  var isRec = isRecoveryCategory(cat);
+                  return `
+                    <div class="flex items-center justify-between text-[11px] text-slate-700">
+                      <div class="flex items-center gap-1">
+                        <span class="px-1 py-0.2 rounded text-[9px] font-black ${isRec ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'}">${cat}</span>
+                        <span class="font-mono font-bold text-indigo-700">${it.계약번호 || '-'}</span>
+                      </div>
+                      <span class="text-slate-600 truncate max-w-[130px] font-medium" title="${it.품목_수량 || '-'}">${it.품목_수량 || '-'}</span>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+
+              <div class="p-2 ${analysis.isMixed ? 'bg-gradient-to-br from-blue-50/60 to-purple-50/60 border-purple-200' : 'bg-purple-100/60 border-purple-200'} rounded-lg border space-y-1">
+                <div class="text-[10px] font-black text-purple-700 flex items-center justify-between">
+                  <span class="flex items-center gap-1"><i class="fa-solid fa-wand-magic-sparkles"></i> 묶음 합산 결과:</span>
+                  ${analysis.isMixed ? `<span class="text-[9.5px] text-amber-700 font-black">⚠️ 출고+회수 복합</span>` : ''}
+                </div>
+                ${analysis.isMixed ? `
+                  <div class="space-y-0.5 text-[11px]">
+                    <div class="text-blue-900 font-bold truncate">🚚 출고: ${analysis.outboundItems || '-'}</div>
+                    <div class="text-purple-900 font-bold truncate">📦 회수: ${analysis.inboundItems || '-'}</div>
+                  </div>
+                ` : `
+                  <div class="font-bold text-purple-950 text-[11px] truncate" title="${analysis.mergedItems}">
+                    ${analysis.mergedItems || '품목 없음'}
+                  </div>
+                `}
+                <div class="text-[10px] text-purple-800 pt-0.5">
+                  🚗 운행일지 <b>단 1곳의 경유지</b>로 통합 반영
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      updateSameAddressBundleSelectedCount();
+      modal.classList.remove('hidden');
+    }
+
+    function updateSameAddressBundleSelectedCount() {
+      var cbs = document.querySelectorAll('.same-addr-group-cb:checked');
+      var el = document.getElementById('sameAddressBundleSelectedCount');
+      if (el) el.innerText = cbs.length;
+      var btn = document.getElementById('sameAddressBundleExecuteBtn');
+      if (btn) btn.disabled = (cbs.length === 0);
+    }
+
+    function closeSameAddressBundleModal() {
+      var modal = document.getElementById('sameAddressBundleModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function executeSameAddressBundling() {
+      var cbs = document.querySelectorAll('.same-addr-group-cb:checked');
+      if (cbs.length === 0) {
+        alert('묶음을 실행할 배송지를 1곳 이상 선택해주세요.');
+        return;
+      }
+
+      var btn = document.getElementById('sameAddressBundleExecuteBtn');
+      var origBtnHtml = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 묶음 처리 중...';
+      }
+
+      try {
+        var selectedIndices = Array.from(cbs).map(function(cb) { return parseInt(cb.dataset.idx, 10); });
+        var candidateGroups = _cachedSameAddressCandidates || [];
+        var totalMergedCount = 0;
+
+        for (var gIdx of selectedIndices) {
+          var cand = candidateGroups[gIdx];
+          if (!cand || !cand.items || cand.items.length < 2) continue;
+
+          var selectedRecords = cand.items;
+          var bundleId = 'BUNDLE_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+          var masterRecord = selectedRecords[0];
+          var subRecords = selectedRecords.slice(1);
+          var allContracts = selectedRecords.map(function(r) { return r.계약번호 || '-'; });
+          var subIds = subRecords.map(function(r) { return r.ID; });
+
+          var analysis = analyzeBundleCategoriesAndItems(selectedRecords);
+
+          var masterSpecialObj = {};
+          if (masterRecord.추후일정_특이사항) {
+            try { masterSpecialObj = JSON.parse(masterRecord.추후일정_특이사항); } catch(e) {}
+          }
+          masterSpecialObj.bundle_id = bundleId;
+          masterSpecialObj.bundle_role = 'master';
+          masterSpecialObj.bundle_count = allContracts.length;
+          masterSpecialObj.bundle_sub_ids = subIds;
+          masterSpecialObj.bundle_contracts = allContracts;
+          masterSpecialObj.bundle_customer = masterRecord.고객사;
+          masterSpecialObj.bundle_addr = masterRecord.주소;
+          masterSpecialObj.original_items = masterRecord.품목_수량 || '';
+          masterSpecialObj.original_category = masterRecord.구분 || masterRecord.category || '배송';
+          masterSpecialObj.merged_items = analysis.mergedItems;
+          masterSpecialObj.is_mixed = analysis.isMixed;
+          masterSpecialObj.has_outbound = analysis.hasOutbound;
+          masterSpecialObj.has_inbound = analysis.hasInbound;
+          masterSpecialObj.outbound_items = analysis.outboundItems;
+          masterSpecialObj.outbound_contracts = analysis.outboundContracts;
+          masterSpecialObj.inbound_items = analysis.inboundItems;
+          masterSpecialObj.inbound_contracts = analysis.inboundContracts;
+          masterSpecialObj.contract_details = analysis.contractDetails;
+          masterSpecialObj.bundled_at = new Date().toISOString();
+
+          masterRecord.품목_수량 = analysis.mergedItems;
+          masterRecord.items = analysis.mergedItems;
+          masterRecord.구분 = analysis.category;
+          masterRecord.category = analysis.category;
+          masterRecord.추후일정_특이사항 = JSON.stringify(masterSpecialObj);
+          masterRecord.memo_special = JSON.stringify(masterSpecialObj);
+
+          for (var i = 0; i < subRecords.length; i++) {
+            var sub = subRecords[i];
+            var subSpecialObj = {};
+            if (sub.추후일정_특이사항) {
+              try { subSpecialObj = JSON.parse(sub.추후일정_특이사항); } catch(e) {}
+            }
+            subSpecialObj.bundle_id = bundleId;
+            subSpecialObj.bundle_role = 'sub';
+            subSpecialObj.bundle_master_id = masterRecord.ID;
+            subSpecialObj.bundle_contracts = allContracts;
+            subSpecialObj.original_items = sub.품목_수량 || '';
+            subSpecialObj.bundled_at = new Date().toISOString();
+
+            sub.추후일정_특이사항 = JSON.stringify(subSpecialObj);
+            sub.memo_special = JSON.stringify(subSpecialObj);
+          }
+
+          totalMergedCount += selectedRecords.length;
+
+          // Supabase DB 저장
+          if (supabaseClient) {
+            var mRes = await supabaseClient.from('delivery_schedules').update({
+              items: analysis.mergedItems,
+              category: analysis.category,
+              memo_special: JSON.stringify(masterSpecialObj)
+            }).eq('id', masterRecord.ID);
+            if (mRes.error) console.warn('Master bundle DB update warning:', mRes.error);
+
+            for (var i = 0; i < subRecords.length; i++) {
+              var sub = subRecords[i];
+              var sRes = await supabaseClient.from('delivery_schedules').update({
+                memo_special: sub.memo_special
+              }).eq('id', sub.ID);
+              if (sRes.error) console.warn('Sub bundle DB update warning:', sRes.error);
+            }
+          }
+        }
+
+        closeSameAddressBundleModal();
+        renderTable();
+        updateSameAddressBundleBanner();
+
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'success',
+            title: '동일 주소 일괄 묶음 완료',
+            text: `${selectedIndices.length}개 배송지(총 ${totalMergedCount}건)가 1건씩 성공적으로 묶였습니다. 운행일지에도 1곳의 경유지로 자동 집계됩니다.`,
+            confirmButtonColor: '#9333ea'
+          });
+        } else {
+          alert(`🎉 ${selectedIndices.length}개 배송지(총 ${totalMergedCount}건)가 성공적으로 묶였습니다.`);
+        }
+      } catch(err) {
+        console.error('Error executing same address bundling:', err);
+        alert('동일 주소 묶음 처리 중 오류: ' + (err.message || err));
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origBtnHtml;
+        }
+      }
     }
 
     async function applyBatchDriverAssignment() {
