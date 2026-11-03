@@ -117,6 +117,8 @@
         stopIndex: i,
         type: isMidReturn ? 'mid_return' : (s.type || 'delivery'),
         badgeText: badgeText,
+        bundle_role: s.bundle_role || null,
+        bundle_count: s.bundle_count || null,
         order: isMidReturn ? null : (s.order || (i - startIdx + 1)),
         fromName: fromName,
         name: s.name || (isReturn ? '가산 센터' : (isMidReturn ? '가산 센터 (중간 복귀)' : '배송지')),

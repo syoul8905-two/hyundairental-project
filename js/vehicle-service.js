@@ -477,6 +477,10 @@
         var endKm = existingPayload.end_km || startKm;
         var distKm = existingPayload.distance_km || (endKm >= startKm ? (endKm - startKm) : 0);
 
+        var isLocalDismissal = Boolean(existingPayload.is_local_dismissal);
+        var destAddr = (isLocalDismissal && existingPayload.destination_addr) ? existingPayload.destination_addr : origin.ADDR;
+        var destName = (isLocalDismissal && existingPayload.destination_name) ? existingPayload.destination_name : origin.NAME;
+
         var mergedPayload = Object.assign({}, existingPayload, {
           vehicle_no: vehNo,
           trip_date: cleanDate,
@@ -484,8 +488,9 @@
           start_km: startKm,
           end_km: endKm,
           distance_km: distKm,
-          destination_addr: origin.ADDR,
-          destination_name: origin.NAME,
+          destination_addr: destAddr,
+          destination_name: destName,
+          is_local_dismissal: isLocalDismissal,
           stops: stops,
           is_unoperated: false
         });

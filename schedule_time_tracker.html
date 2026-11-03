@@ -1135,16 +1135,18 @@
           try { payload = JSON.parse(row.memo_full || '{}'); } catch(e) {}
           if (Array.isArray(payload.stops)) {
             var stopFound = payload.stops.find(function(s) {
-              return (s.id && s.id === 'stop_deliv_' + rec.id) ||
-                     (s.name && rec.customer_name && s.name.trim() === rec.customer_name.trim());
+              var sameId = (s.id && s.id === 'stop_deliv_' + rec.id);
+              var sameCust = (s.name && rec.customer_name && s.name.trim() === rec.customer_name.trim());
+              var sameAddr = (!s.addr || !rec.address || s.addr.replace(/\s+/g,'').includes(rec.address.replace(/\s+/g,'').slice(0,8)));
+              return sameId || (sameCust && sameAddr);
             });
             if (stopFound) {
               stopFound.depart = depTime || '';
               stopFound.arrive = arrTime || '';
               stopFound.status = newStatus || '';
               stopFound.time = rec.visit_time || stopFound.time;
-              if (rec.address) stopFound.addr = rec.address;
-              if (rec.items) stopFound.memo = rec.items;
+              if (rec.address && (!stopFound.addr || stopFound.addr === '-')) stopFound.addr = rec.address;
+              if (rec.items && (!stopFound.bundle_role || stopFound.bundle_role !== 'master')) stopFound.memo = rec.items;
 
               await supabaseClient.from('delivery_schedules')
                 .update({ memo_full: JSON.stringify(payload) })

@@ -3674,6 +3674,11 @@
         stops[legIdx].end_km = runningOdo + legDist;
         runningOdo += legDist;
       }
+      if (stops.length > 0) {
+        var lastStop = stops[stops.length - 1];
+        lastStop.end_km = Number(endKm);
+        lastStop.distance_km = Math.max(0, Number(endKm) - Number(lastStop.start_km));
+      }
     }
 
     // Modal Stops State
@@ -5491,24 +5496,42 @@
         var dayDeliveries = daySchedulesMap[dayStr] || [];
         var cnt = dayDeliveries.length;
 
-        // Build stops for this day (Origin -> Deliveries -> Return)
-        var dayStops = [
-          { type: 'origin', name: '가산 센터', addr: '서울 금천구 벚꽃로 278 (가산 센터)' }
-        ];
-        dayDeliveries.forEach(function(r, idx) {
-          dayStops.push({
-            type: 'delivery',
-            order: idx + 1,
-            name: r.customer_name || '고객사',
-            addr: r.address || r.customer_address || '',
-            memo: r.items || r.product_name || ''
+        // [Zero Data-Loss] 기존 일지가 이미 존재할 경우 사용자가 정제해둔 stops를 100% 그대로 활용!
+        var existingLog = tripLogs.find(function(l) { return l.trip_date === dayStr; });
+        var dayStops = [];
+        if (existingLog && Array.isArray(existingLog.stops) && existingLog.stops.length > 0) {
+          dayStops = JSON.parse(JSON.stringify(existingLog.stops));
+        } else {
+          // 신규 일자 생성 시만 스케줄 기반 생성 (기사 필터, 퀵/택배/방문수령 제외, 서브 번들 제외)
+          dayStops = [
+            { type: 'origin', name: '가산 센터', addr: '서울 금천구 벚꽃로 278 (가산 센터)' }
+          ];
+          var defDrv = document.getElementById('autoDistributeDriverText') ? document.getElementById('autoDistributeDriverText').innerText.trim() : '';
+          var eligibleDeliveries = dayDeliveries.filter(function(r) {
+            if (defDrv && r.driver_name && r.driver_name.trim() !== defDrv) return false;
+            var isQuick = (r.delivery_method === '퀵배송' || r.delivery_method === '퀵' || r.driver_name === '퀵' || (r.category && r.category.indexOf('퀵') !== -1));
+            var isPickup = (r.delivery_method === '방문수령' || r.driver_name === '방문수령' || (r.category === '수령' && r.delivery_method !== '직배송'));
+            var isParcel = (r.delivery_method === '택배' || r.driver_name === '택배');
+            if (isQuick || isPickup || isParcel) return false;
+            if (r.memo_special && r.memo_special.includes('"bundle_role":"sub"')) return false;
+            return true;
           });
-        });
-        dayStops.push({
-          type: 'return',
-          name: '가산 센터',
-          addr: '서울 금천구 벚꽃로 278 (가산 센터)'
-        });
+          eligibleDeliveries.forEach(function(r, idx) {
+            dayStops.push({
+              id: 'stop_deliv_' + r.id,
+              type: 'delivery',
+              order: idx + 1,
+              name: r.customer_name || '고객사',
+              addr: r.address || r.customer_address || '',
+              memo: r.items || r.product_name || ''
+            });
+          });
+          dayStops.push({
+            type: 'return',
+            name: '가산 센터',
+            addr: '서울 금천구 벚꽃로 278 (가산 센터)'
+          });
+        }
 
         var dayNaviDist = cnt > 0 ? calcRouteDistanceForStops(dayStops) : 0;
         dayNaviDist = Math.round(dayNaviDist * 10) / 10;
@@ -5756,43 +5779,49 @@
           var defaultDriver = document.getElementById('autoDistributeDriverText').innerText.trim() || '조경찬';
           var rowsToInsert = cachedAutoDistributedLogs.map(function(item) {
             var exist = existingFeesMap[item.trip_date] || { parking_fee: 0, fuel_fee: 0, stopFees: {} };
+            var existingLog = tripLogs.find(function(l) { return l.trip_date === item.trip_date; });
             var dayStops = (item.stops && item.stops.length > 0) ? JSON.parse(JSON.stringify(item.stops)) : [];
             var dayPark = exist.parking_fee || 0;
             var dayFuel = exist.fuel_fee || 0;
 
             if (dayStops.length > 0) {
-              var legCount = dayStops.length;
-              var curK = item.start_km;
-              var dPerLeg = Math.floor(item.distance_km / legCount);
-              var remD = item.distance_km % legCount;
-              dayStops.forEach(function(st, sIdx) {
-                var legD = dPerLeg + (sIdx < remD ? 1 : 0);
-                st.start_km = curK;
-                st.end_km = curK + legD;
-                st.distance_km = legD;
+              distributeDayDistanceProportionally(dayStops, item.start_km, item.end_km);
+              dayStops.forEach(function(st) {
                 var sMatch = exist.stopFees[st.name];
-                st.parking_fee = sMatch ? Number(sMatch.parking_fee || 0) : Number(st.parking_fee || 0);
-                st.fuel_fee = sMatch ? Number(sMatch.fuel_fee || 0) : Number(st.fuel_fee || 0);
-                curK += legD;
+                if (sMatch) {
+                  if (sMatch.parking_fee) st.parking_fee = Number(sMatch.parking_fee);
+                  if (sMatch.fuel_fee) st.fuel_fee = Number(sMatch.fuel_fee);
+                }
               });
             }
+
+            var origAddr = (existingLog && existingLog.origin_addr) || (dayStops[0] && dayStops[0].addr) || '서울 금천구 벚꽃로 278 (가산 센터)';
+            var origName = (existingLog && existingLog.origin_name) || (dayStops[0] && dayStops[0].name) || '가산 센터';
+            var destAddr = (existingLog && existingLog.destination_addr) || (dayStops[dayStops.length - 1] && dayStops[dayStops.length - 1].addr) || '서울 금천구 벚꽃로 278 (가산 센터)';
+            var destName = (existingLog && existingLog.destination_name) || (dayStops[dayStops.length - 1] && dayStops[dayStops.length - 1].name) || '가산 센터';
 
             var logPayload = {
               vehicle_no: currentSelectedVehicleNo,
               trip_date: item.trip_date,
-              driver_name: item.driver_name || defaultDriver,
+              driver_name: (existingLog && existingLog.driver_name) || item.driver_name || defaultDriver,
               start_km: item.start_km,
               end_km: item.end_km,
               distance_km: item.distance_km,
               suggested_distance_km: item.navi_dist_km || (item.distance_km * 0.98).toFixed(1),
-              is_local_dismissal: false,
-              destination_addr: '서울 금천구 벚꽃로 278 (가산 센터)',
-              destination_name: '가산 센터',
+              is_local_departure: existingLog ? Boolean(existingLog.is_local_departure) : false,
+              origin_addr: origAddr,
+              origin_name: origName,
+              is_local_dismissal: existingLog ? Boolean(existingLog.is_local_dismissal) : false,
+              destination_addr: destAddr,
+              destination_name: destName,
               parking_fee: dayPark,
               fuel_fee: dayFuel,
-              is_unoperated: false,
+              is_unoperated: existingLog ? Boolean(existingLog.is_unoperated) : false,
+              is_closed: existingLog ? Boolean(existingLog.is_closed) : false,
+              closed_at: (existingLog && existingLog.closed_at) || '',
+              deleted_stop_ids: (existingLog && Array.isArray(existingLog.deleted_stop_ids)) ? existingLog.deleted_stop_ids : [],
               stops: dayStops,
-              memo: item.delivery_count > 0 ? (item.navi_dist_km > 0 ? `배송 ${item.delivery_count}건 운행 (네비 ${item.navi_dist_km}km)` : `배송 ${item.delivery_count}건 운행`) : '업무용 정기 운행'
+              memo: (existingLog && existingLog.memo) || (item.delivery_count > 0 ? (item.navi_dist_km > 0 ? `배송 ${item.delivery_count}건 운행 (네비 ${item.navi_dist_km}km)` : `배송 ${item.delivery_count}건 운행`) : '업무용 정기 운행')
             };
 
             return {
