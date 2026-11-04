@@ -2023,6 +2023,18 @@
       };
     }
 
+    function preserveSpecialMemo(record, newFields) {
+      var base = {};
+      var raw = (record && record.memo_special) ? record.memo_special : '';
+      if (raw) {
+        try {
+          base = (typeof raw === 'string') ? JSON.parse(raw) : Object.assign({}, raw);
+        } catch(e) { base = {}; }
+      }
+      return JSON.stringify(Object.assign({}, base, newFields));
+    }
+
+
     // ==========================================
     // Mobile Destination Management Engine
     // ==========================================
@@ -4371,19 +4383,23 @@
     function parseMobileBundleInfo(r) {
       if (!r) return null;
       var raw = r.memo_special || '';
-      if (!raw) return null;
+      var p = null;
+      if (raw) {
+        try {
+          p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+        } catch(e) {}
+      }
       try {
-        var p = (typeof raw === 'string') ? JSON.parse(raw) : raw;
         if (p && (p.bundle_id || p.bundle_role)) {
           var isMixed = !!p.is_mixed || (r.category === '배송+회수' || (r.category && r.category.indexOf('배송+회수') !== -1)) || ((p.merged_items || '').indexOf('[출고') !== -1 && (p.merged_items || '').indexOf('[회수') !== -1);
           var outboundItems = p.outbound_items || '';
           var inboundItems = p.inbound_items || '';
-          if (!outboundItems && isMixed && p.merged_items) {
-            var mOut = p.merged_items.match(/\[출고(?:\/전달)?\]\s*([^|]+)/);
+          if (!outboundItems && isMixed && (p.merged_items || r.items)) {
+            var mOut = (p.merged_items || r.items).match(/\[출고(?:\/전달)?\]\s*([^|]+)/);
             if (mOut) outboundItems = mOut[1].trim();
           }
-          if (!inboundItems && isMixed && p.merged_items) {
-            var mIn = p.merged_items.match(/\[회수(?:\/수거)?\]\s*([^|]+)/);
+          if (!inboundItems && isMixed && (p.merged_items || r.items)) {
+            var mIn = (p.merged_items || r.items).match(/\[회수(?:\/수거)?\]\s*([^|]+)/);
             if (mIn) inboundItems = mIn[1].trim();
           }
           return {
@@ -4406,6 +4422,36 @@
             inboundItems: inboundItems,
             inboundContracts: p.inbound_contracts || [],
             contractDetails: p.contract_details || []
+          };
+        }
+
+        // Resilient fallback for mixed bundle if bundle_role missing in memo_special
+        var itemsStr = (p && p.merged_items) || r.items || '';
+        if (r.category === '배송+회수' || (itemsStr.indexOf('[출고') !== -1 && itemsStr.indexOf('[회수') !== -1)) {
+          var mOut2 = itemsStr.match(/\[출고(?:\/전달)?\]\s*([^|]+)/);
+          var mIn2 = itemsStr.match(/\[회수(?:\/수거)?\]\s*([^|]+)/);
+          var ob = mOut2 ? mOut2[1].trim() : '';
+          var ib = mIn2 ? mIn2[1].trim() : '';
+          return {
+            id: (p && p.bundle_id) || ('BUNDLE_' + r.id),
+            role: 'master',
+            count: (p && p.bundle_count) || 2,
+            masterId: r.id,
+            subIds: (p && p.bundle_sub_ids) || [],
+            contracts: (p && p.bundle_contracts) || (r.contract_no ? [r.contract_no] : []),
+            originalItems: (p && p.original_items) || '',
+            originalCategory: (p && p.original_category) || '',
+            mergedItems: itemsStr,
+            customer: r.customer_name || '',
+            addr: r.address || '',
+            isMixed: true,
+            hasOutbound: true,
+            hasInbound: true,
+            outboundItems: ob,
+            outboundContracts: (p && p.outbound_contracts) || [],
+            inboundItems: ib,
+            inboundContracts: (p && p.inbound_contracts) || [],
+            contractDetails: (p && p.contract_details) || []
           };
         }
       } catch(e) {}
@@ -4699,19 +4745,7 @@
           </div>
 
           ${(bInfo && bInfo.role === 'master' && bInfo.isMixed) ? `
-            <!-- 🚨 [출고 + 회수 복합 배송지 전용 대형 알림 배너] -->
-            <div class="p-3 bg-gradient-to-r from-amber-500 via-rose-500 to-amber-600 text-white rounded-2xl shadow-sm space-y-1">
-              <div class="flex items-center gap-1.5 font-black text-xs text-yellow-100 tracking-wide">
-                <i class="fa-solid fa-triangle-exclamation text-base animate-bounce"></i>
-                <span>🚨 [출고 + 회수 동시 진행 배송지]</span>
-              </div>
-              <p class="text-[11.5px] font-bold text-white leading-snug">
-                물품 전달(출고)과 물품 수거(회수)를 <b>둘 다 진행</b>해야 합니다!<br>
-                절대 하나만 처리하고 출발하지 마세요!
-              </p>
-            </div>
-
-            <!-- 2 Big Foolproof Action Cards -->
+            <!-- 2 Big Action Cards (출고 / 회수 분리) -->
             <div class="space-y-2 pt-0.5">
               <!-- Box 1: 출고/전달 (차에서 내릴 것) -->
               <div class="p-3 bg-gradient-to-r from-blue-50 to-indigo-50 border-2 border-blue-400 rounded-2xl space-y-2 shadow-xs">
@@ -5631,7 +5665,7 @@
       var times = getStopTimes(r);
       if (!times.depart) {
         times.depart = nowStr;
-        var jsonStr = JSON.stringify(times);
+        var jsonStr = preserveSpecialMemo(r, times);
         r.memo_special = jsonStr;
         r.status = '운행중';
 
@@ -5665,16 +5699,7 @@
         return;
       }
 
-      var bInfoForArrive = parseMobileBundleInfo(r);
-      if (bInfoForArrive && bInfoForArrive.isMixed) {
-        if (!confirm(`🚨 [출고 + 회수 동시 진행 배송지 확인]\n고객사: ${r.customer_name}\n\n1. 🚚 출고 물품 전달 완료: ${bInfoForArrive.outboundItems || '출고물품'}\n2. 📦 회수 물품 수거 완료: ${bInfoForArrive.inboundItems || '회수물품'}\n\n전달과 수거를 둘 다 완료하셨습니까?\n도착시간 및 완료가 기록됩니다.`)) {
-          return;
-        }
-      } else {
-        if (!confirm(`🏁 [${r.customer_name}] 배송지에 도착하셨습니까?\n현재 시각으로 도착 완료가 기록됩니다.`)) {
-          return;
-        }
-      }
+      // 도착 완료 처리 (팝업 없이 1터치 즉시 완료 및 시각 기록)
 
       var nowStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
       var times = getStopTimes(r);
@@ -5682,7 +5707,7 @@
       times.arrive = nowStr;
 
       var dur = calculateDurationMinutes(times.depart, times.arrive);
-      var jsonStr = JSON.stringify(times);
+      var jsonStr = preserveSpecialMemo(r, times);
 
       showToast('⏳ [서버 전송 중] 배송지 도착 상태를 기록 중입니다...');
 
@@ -5905,7 +5930,7 @@
       }
       times.arrive = nowStr;
       var dur = calculateDurationMinutes(times.depart, times.arrive);
-      var jsonStr = JSON.stringify(times);
+      var jsonStr = preserveSpecialMemo(r, times);
 
       showToast('⏳ [서버 전송 중] 퀵 출발 기록 중...');
 
