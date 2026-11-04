@@ -604,7 +604,7 @@
         <h2 class="font-black text-sm text-slate-900 flex items-center gap-1.5">
           <i class="fa-solid fa-table-list text-indigo-600"></i> 배송 현황 목록
         </h2>
-        <span class="text-slate-400 font-bold">조회: <b id="tableCount" class="text-indigo-600">0</b>건</span>
+        <span class="text-slate-400 font-bold">조회: <span id="tableCountContainer"><b id="tableCount" class="text-indigo-600">0</b>건</span></span>
       </div>
 
       <!-- Search & Filters & Add Stop Button -->
@@ -4427,6 +4427,35 @@
       onDriverFilterChanged();
     }
 
+    
+    // ==========================================
+    // Delivery Destination & Contract Stats Helper
+    // ==========================================
+    function getDeliveryDestinationStats(recordList) {
+      if (!recordList) recordList = records || [];
+      var destCount = 0;
+      var contractCount = 0;
+      recordList.forEach(function(r) {
+        var b = parseBundleInfo(r);
+        if (b && b.role === 'sub') {
+          var masterExists = recordList.some(function(rec) {
+            return rec !== r && ((b.masterId && (rec.ID == b.masterId || rec.id == b.masterId)) || (b.contracts && b.contracts.indexOf(rec.계약번호) !== -1));
+          });
+          if (masterExists) return;
+        }
+        destCount++;
+        if (b && b.role === 'master' && b.contracts && b.contracts.length > 0) {
+          contractCount += b.contracts.length;
+        } else {
+          contractCount++;
+        }
+      });
+      return {
+        destinations: destCount,
+        contracts: Math.max(contractCount, recordList.length)
+      };
+    }
+
     function renderDriverSelectPopover() {
       var listEl = document.getElementById('driverSelectPopoverList');
       if (!listEl) return;
@@ -4459,7 +4488,7 @@
             <span class="${isAllActive ? 'text-white' : 'text-amber-500'} font-bold">👥</span>
             <span>전체 기사 보기 (일괄 관제)</span>
           </div>
-          <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isAllActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}">${records.length}건</span>
+          <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isAllActive ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'}">${(function() { var s = getDeliveryDestinationStats(records); return (s.destinations !== s.contracts) ? (s.destinations + "곳 (" + s.contracts + "건)") : (s.contracts + "건"); })()}</span>
         </button>
       `;
 
@@ -4471,7 +4500,7 @@
               <span>⚠️</span>
               <span>기사 미지정</span>
             </div>
-            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isUnActive ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'}">${unassignedCount}건</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-black ${isUnActive ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'}">${(function() { var unRecs = records.filter(function(r){ return !(r.담당기사 || "").trim(); }); var s = getDeliveryDestinationStats(unRecs); return (s.destinations !== s.contracts) ? (s.destinations + "곳 (" + s.contracts + "건)") : (s.contracts + "건"); })()}</span>
           </button>
         `;
       }
@@ -4600,7 +4629,7 @@
       var kpiEl = document.getElementById('kpiDriver');
       if (kpiEl) {
         if (driverVal === 'all' || !driverVal) {
-          kpiEl.innerText = '전체 기사 (' + realDeliveries.length + '건)';
+          var s = getDeliveryDestinationStats(realDeliveries); kpiEl.innerText = (s.destinations !== s.contracts) ? ('전체 기사 (' + s.destinations + '곳 / ' + s.contracts + '건)') : ('전체 기사 (' + s.contracts + '건)');
         } else if (driverVal === '') {
           kpiEl.innerText = '기사 미지정 (' + realDeliveries.length + '건)';
         } else {
@@ -8228,8 +8257,17 @@
           if (driverFilter !== '' && d !== driverFilter) return false;
         }
         // 묶음 서브 건은 최상단 목록에서 숨김 (마스터 행 내부에 종속 표출)
+        // 단, 마스터 건이 현재 records에 실제로 존재하는 경우에만 숨김 (고아 서브 건은 단독 표출)
         var spBundle = parseBundleInfo(r);
-        if (spBundle && spBundle.role === 'sub') return false;
+        if (spBundle && spBundle.role === 'sub') {
+          var masterExists = records.some(function(rec) {
+            if (!rec || rec === r) return false;
+            if (spBundle.masterId && (rec.ID == spBundle.masterId || rec.id == spBundle.masterId)) return true;
+            if (spBundle.contracts && spBundle.contracts.indexOf(rec.계약번호) !== -1) return true;
+            return false;
+          });
+          if (masterExists) return false;
+        }
 
         if (kw) {
           var matchStr = (r.고객사 + ' ' + r.주소 + ' ' + r.품목_수량 + ' ' + r.담당기사 + ' ' + r.계약번호 + ' ' + (r.배송방법 || '') + ' ' + (r.비고_전문 || '')).toLowerCase();
@@ -8243,7 +8281,27 @@
       var tbody = document.getElementById('tableBody');
       var filtered = getFilteredDeliveryRecords();
 
-      document.getElementById('tableCount').innerText = filtered.length;
+      var totalContractsCount = 0;
+      filtered.forEach(function(r) {
+        var bInfo = parseBundleInfo(r);
+        if (bInfo && bInfo.role === 'master' && bInfo.contracts && bInfo.contracts.length > 0) {
+          totalContractsCount += bInfo.contracts.length;
+        } else {
+          totalContractsCount += 1;
+        }
+      });
+
+      var countContainer = document.getElementById('tableCountContainer');
+      var countEl = document.getElementById('tableCount');
+      if (countContainer) {
+        if (totalContractsCount !== filtered.length) {
+          countContainer.innerHTML = '<b id="tableCount" class="text-indigo-600">' + filtered.length + '곳</b> <span class="text-slate-400 font-bold text-xs">(총 ' + totalContractsCount + '건)</span>';
+        } else {
+          countContainer.innerHTML = '<b id="tableCount" class="text-indigo-600">' + filtered.length + '</b>건';
+        }
+      } else if (countEl) {
+        countEl.innerText = filtered.length;
+      }
       tbody.innerHTML = '';
 
       if (filtered.length === 0) {

@@ -4618,7 +4618,12 @@ function getPastDeliveryInfoForRecord(r) {
 
       var realDeliveries = driverRecords.filter(function(r) {
         var b = parseMobileBundleInfo(r);
-        if (b && b.role === 'sub') return false;
+        if (b && b.role === 'sub') {
+          var masterExists = allMobileRows.some(function(rec) {
+            return rec !== r && ((b.masterId && (rec.id == b.masterId || rec.ID == b.masterId)) || (b.contracts && b.contracts.indexOf(rec.contract_no) !== -1));
+          });
+          if (masterExists) return false;
+        }
         return r.category !== 'mid_return' && (!r.customer_name || r.customer_name.indexOf('(중간 복귀)') === -1);
       });
       var total = realDeliveries.length;
