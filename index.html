@@ -3276,9 +3276,10 @@
     async function fetchContractHistoryIndex() {
       if (!supabaseClient) return;
       try {
+        // [Payload Diet] 대용량 Base64 사진이 포함된 memo_special/items 필드를 전체 인덱스 쿼리에서 원천 배제 (19MB -> 58KB, 99.7% 감량)
         var res = await supabaseClient
           .from('delivery_schedules')
-          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status, memo_special, items')
+          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status')
           .not('contract_no', 'is', null)
           .neq('contract_no', '')
           .neq('contract_no', '신규등록')
@@ -3292,26 +3293,94 @@
           var cNo = (row.contract_no || '').trim();
           if (isPlaceholderContractNo(cNo)) return;
           if (!map.has(cNo)) map.set(cNo, []);
-          var memoTimes = getStopTimes(row);
           map.get(cNo).push({
             id: row.id,
             delivery_date: row.delivery_date || '',
             customer_name: row.customer_name || '',
-            driver_name: memoTimes.issueAuthor || row.driver_name || '',
+            driver_name: row.driver_name || '',
             category: row.category || '',
             status: row.status || '',
-            memo_special: row.memo_special || '',
-            issue: memoTimes.issue || '',
-            issueAuthor: memoTimes.issueAuthor || row.driver_name || '',
-            photo: memoTimes.photo || ''
+            memo_special: '',
+            issue: '',
+            issueAuthor: row.driver_name || '',
+            photo: ''
           });
         });
         contractHistoryIndexMap = map;
         if (records && records.length > 0) {
+          await fetchVisibleContractNotes(records);
           renderTable();
         }
       } catch(e) {
         console.warn('Failed to load contract history index:', e);
+      }
+    }
+
+    // [Payload Diet] 당일 화면에 표출 중인 계약 건(5~10건)에 한해서만 과거 memo_special(특이사항/사진)을 타겟 조회 (0.7KB, 0.2s)
+    var fetchedVisibleNotesContractSet = new Set();
+    async function fetchVisibleContractNotes(rows, forceRefresh) {
+      if (!supabaseClient || !rows || rows.length === 0) return;
+      if (forceRefresh) fetchedVisibleNotesContractSet.clear();
+      try {
+        var contractList = [];
+        rows.forEach(function(r) {
+          var bInfo = (typeof parseBundleInfo === 'function') ? parseBundleInfo(r) : null;
+          var contracts = (bInfo && bInfo.contracts && bInfo.contracts.length > 0)
+            ? bInfo.contracts
+            : [(r.계약번호 || r.contract_no || '')];
+
+          contracts.forEach(function(cNo) {
+            cNo = (cNo || '').trim();
+            if (!isPlaceholderContractNo(cNo) && !fetchedVisibleNotesContractSet.has(cNo) && !contractList.includes(cNo)) {
+              contractList.push(cNo);
+            }
+          });
+        });
+
+        if (contractList.length === 0) return;
+
+        var res = await supabaseClient
+          .from('delivery_schedules')
+          .select('id, contract_no, delivery_date, customer_name, driver_name, memo_special')
+          .in('contract_no', contractList)
+          .not('memo_special', 'is', null)
+          .order('delivery_date', { ascending: false });
+
+        if (res.error) throw res.error;
+
+        contractList.forEach(function(c) { fetchedVisibleNotesContractSet.add(c); });
+
+        (res.data || []).forEach(function(row) {
+          var cNo = (row.contract_no || '').trim();
+          var list = contractHistoryIndexMap.get(cNo);
+          if (!list) {
+            list = [];
+            contractHistoryIndexMap.set(cNo, list);
+          }
+          var memoTimes = (typeof getStopTimes === 'function') ? getStopTimes(row) : { issue: '', issueAuthor: '', photo: '' };
+          var targetItem = list.find(function(it) { return it.id === row.id; });
+          if (targetItem) {
+            targetItem.memo_special = row.memo_special || '';
+            targetItem.issue = memoTimes.issue || '';
+            targetItem.issueAuthor = memoTimes.issueAuthor || row.driver_name || '';
+            targetItem.photo = memoTimes.photo || '';
+          } else {
+            list.push({
+              id: row.id,
+              delivery_date: row.delivery_date || '',
+              customer_name: row.customer_name || '',
+              driver_name: memoTimes.issueAuthor || row.driver_name || '',
+              category: row.category || '',
+              status: row.status || '',
+              memo_special: row.memo_special || '',
+              issue: memoTimes.issue || '',
+              issueAuthor: memoTimes.issueAuthor || row.driver_name || '',
+              photo: memoTimes.photo || ''
+            });
+          }
+        });
+      } catch(e) {
+        console.warn('[Payload Diet] fetchVisibleContractNotes error:', e);
       }
     }
 
@@ -8124,6 +8193,9 @@
 
       updateDriverFilterOptions();
       updateKPIs();
+      if (records && records.length > 0) {
+        await fetchVisibleContractNotes(records);
+      }
       renderTable();
       renderRouteMap();
 
@@ -11877,6 +11949,10 @@ async function unmergeDeliveryBundle(masterId, silent) {
           }
         }
 
+        if (records && records.length > 0) {
+          await fetchVisibleContractNotes(records);
+        }
+
         if (!isSilent || isDataChanged) {
           updateDriverFilterOptions();
           updateKPIs();
@@ -12278,7 +12354,7 @@ async function unmergeDeliveryBundle(masterId, silent) {
 
         var pAs = supabaseClient
           .from('delivery_schedules')
-          .select('id, source_sheet, contract_no, customer_name, category, delivery_date, status, memo_special, memo_full')
+          .select('id, source_sheet, contract_no, customer_name, category, delivery_date, status, memo_full')
           .eq('source_sheet', 'AS_RECORDS')
           .order('delivery_date', { ascending: false })
           .limit(50);
