@@ -23,16 +23,21 @@
   <link rel="apple-touch-icon" href="./icons/icon-192.png">
   <link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png">
   <link rel="icon" type="image/svg+xml" href="./icons/icon-truck.svg">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Preconnect to critical CDNs -->
+  <link rel="preconnect" href="https://cdn.tailwindcss.com">
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <!-- SweetAlert2 Modal Engine -->
-  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
-  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- Deferred Heavy Third-party Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js" defer></script>
   <script type="text/javascript" src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=500cdd195811a28981f211d6641c3aca&libraries=services,clusterer"></script>
   <!-- Daum 우편번호 서비스 (도로명 주소 검색) -->
-  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+  <script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js" defer></script>
   <!-- 공통 모듈화 스크립트 (Phase 1 & Phase 2: Zero-Downtime 안전 로드) -->
   <script src="js/constants-master.js"></script>
   <script src="js/supabase-config.js"></script>
@@ -43,7 +48,7 @@
   <script src="js/vehicle-service.js"></script>
   <script src="js/dashboard-ui.js"></script>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@300;400;500;600;700;800;900&display=swap');
+    /* Official Pretendard loaded via CDN link above */
     body { font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, sans-serif; }
     .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
     .custom-scroll::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 9999px; }
@@ -13258,9 +13263,6 @@ async function unmergeDeliveryBundle(masterId, silent) {
       var reqDate = urlParams.get('date') || savedDate;
       setHeaderCalendarDate(reqDate);
 
-      await syncDriverOriginsFromCloud();
-      initKakaoMapEngine(false);
-      var dates = await loadAvailableDates();
       if (reqDate) {
         setHeaderCalendarDate(reqDate);
         var selectInp = document.getElementById('sheetDateSelect');
@@ -13280,8 +13282,19 @@ async function unmergeDeliveryBundle(masterId, silent) {
         var driverSelect = document.getElementById('driverFilterSelect');
         if (driverSelect) driverSelect.value = reqDriver;
       }
-      await fetchContractHistoryIndex();
-      await triggerSync(false);
+
+      initKakaoMapEngine(false);
+
+      // [Fast Parallel Bootstrap] 메인 스케줄 로드를 최우선 병렬 기동하여 화면 렌더링 지연을 획기적으로 단축
+      var pSync = triggerSync(false);
+      var pSecondary = Promise.all([
+        syncDriverOriginsFromCloud(),
+        loadAvailableDates(),
+        fetchContractHistoryIndex()
+      ]);
+
+      await pSync;
+      await pSecondary;
       if (typeof refreshHistoryNotificationBadges === 'function') {
         refreshHistoryNotificationBadges();
       }
