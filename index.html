@@ -699,6 +699,9 @@
         <button type="button" onclick="mergeSelectedDeliveries()" title="동일 배송지/고객사의 여러 건을 1건의 묶음 배송으로 결합" class="px-3 py-1 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition shadow-xs flex items-center gap-1.5 cursor-pointer">
           <i class="fa-solid fa-link"></i> 동일 배송지 묶음 합치기
         </button>
+        <button type="button" onclick="unmergeSelectedDeliveries()" title="선택된 항목 중 묶음 배송 건들을 개별 배송 건으로 일괄 분리" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-lg transition shadow-xs flex items-center gap-1.5 cursor-pointer">
+          <i class="fa-solid fa-link-slash"></i> 선택 묶음 해제
+        </button>
       </div>
       <button onclick="clearTableSelection()" class="text-slate-500 hover:text-slate-800 font-bold text-xs underline">
         선택 해제
@@ -3275,7 +3278,7 @@
       try {
         var res = await supabaseClient
           .from('delivery_schedules')
-          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status')
+          .select('id, contract_no, delivery_date, customer_name, driver_name, category, status, memo_special, items')
           .not('contract_no', 'is', null)
           .neq('contract_no', '')
           .neq('contract_no', '신규등록')
@@ -8357,47 +8360,108 @@
             <input type="checkbox" class="row-checkbox w-4 h-4 rounded text-indigo-600 cursor-pointer" data-id="${r.ID || ''}" data-idx="${realIdx}" data-stopkey="${stopKey}" ${isStopSelected ? 'checked' : ''} onchange="onRowCheckboxChange(this)" title="체크하여 이 배송지만 실제 도로 경로 보기">
           </td>
           <td class="py-2.5 px-3 font-mono">
-            <div class="flex items-center gap-1.5 group/contract">
-              ${!isPlaceholderContractNo(r.계약번호) ? `
-                <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="text-indigo-600 hover:text-indigo-900 hover:underline font-bold text-xs flex items-center gap-1 truncate max-w-[110px]" title="계약번호 [${r.계약번호}] 과거 이력 및 현장 메모 조회">
-                  <span>${r.계약번호}</span>
-                  <i class="fa-solid fa-clock-rotate-left text-[10px] text-indigo-400"></i>
-                </button>
-              ` : (r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]' || r.계약번호 === '신규등록' || r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가') ? `
-                <span class="text-slate-400 font-bold text-xs whitespace-nowrap font-sans">계약번호 없음</span>
-              ` : `<span class="text-slate-400 text-xs">-</span>`}
-              ${!isDriverUser ? `
-                <button type="button" onclick="openQuickContractEditModal(${realIdx})" class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="계약번호 수정/입력">
-                  <i class="fa-solid fa-pen-to-square text-[11px]"></i>
-                </button>
-              ` : ''}
-            </div>
             ${(function() {
               var bInfo = parseBundleInfo(r);
               if (bInfo && bInfo.role === 'master') {
-                var cCount = (bInfo.contracts && bInfo.contracts.length) || ((bInfo.subIds && bInfo.subIds.length + 1)) || 2;
+                var allContracts = bInfo.contracts || [r.계약번호];
+                var subRecs = (bInfo.subIds || []).map(function(sId) {
+                  return records.find(function(rec) { return rec.ID == sId; });
+                }).filter(Boolean);
+                var allRecs = [r].concat(subRecs);
+                var recMap = {};
+                allRecs.forEach(function(rec) {
+                  if (rec && rec.계약번호) recMap[rec.계약번호] = rec;
+                });
+
+                var contractItems = (bInfo.contractDetails && bInfo.contractDetails.length > 0)
+                  ? bInfo.contractDetails
+                  : allContracts.map(function(c) {
+                      var found = recMap[c];
+                      return {
+                        contract: c,
+                        category: found ? (found.구분 || found.category || '배송') : '배송',
+                        type: isRecoveryCategory(found ? (found.구분 || found.category || '') : '') ? 'inbound' : 'outbound',
+                        actionLabel: isRecoveryCategory(found ? (found.구분 || found.category || '') : '') ? '회수' : '출고',
+                        items: found ? (found.품목_수량 || found.items || '') : ''
+                      };
+                    });
+
                 return `
-                  <div class="mt-1 flex items-center gap-1">
-                    <button type="button" onclick="openBundleDetailModal(${r.ID})" class="px-1.5 py-0.5 bg-purple-100 hover:bg-purple-200 text-purple-800 border border-purple-300 rounded font-black text-[9.5px] inline-flex items-center gap-1 transition shadow-2xs cursor-pointer" title="동일 배송지 묶음 배송: 클릭하여 상세 계약 목록 확인">
-                      <i class="fa-solid fa-link text-purple-600 text-[8.5px]"></i>
-                      <span>묶음 ${cCount}건</span>
-                    </button>
-                    <button type="button" onclick="unmergeDeliveryBundle(${r.ID})" class="px-1 py-0.5 text-slate-400 hover:text-rose-600 text-[9px] font-bold rounded hover:bg-rose-50 transition" title="묶음 해제 (개별 분리)">
-                      <i class="fa-solid fa-link-slash"></i>
-                    </button>
+                  <div class="flex flex-col gap-1 min-w-[130px] max-w-[210px]">
+                    <!-- 묶음 헤더: 묶음 건수 배지 + 눈에 띄는 해제 버튼 -->
+                    <div class="flex items-center justify-between pb-1 border-b border-purple-200">
+                      <button type="button" onclick="openBundleDetailModal(${r.ID})" class="inline-flex items-center gap-1 text-[10px] font-black text-purple-700 bg-purple-50 hover:bg-purple-100 px-1.5 py-0.5 rounded border border-purple-200 cursor-pointer transition shadow-2xs" title="클릭하여 묶음 배송 상세 보기">
+                        <i class="fa-solid fa-link text-purple-600 text-[8.5px]"></i>
+                        <span>묶음 ${allContracts.length}건</span>
+                      </button>
+                      <button type="button" onclick="unmergeDeliveryBundle(${r.ID})" class="px-2 py-0.5 bg-rose-50 hover:bg-rose-100 text-rose-700 hover:text-rose-900 border border-rose-300 rounded text-[9.5px] font-bold transition flex items-center gap-1 cursor-pointer shadow-2xs" title="개별 배송 건으로 묶음 해제">
+                        <i class="fa-solid fa-link-slash text-[8.5px]"></i>
+                        <span>해제</span>
+                      </button>
+                    </div>
+
+                    <!-- 개별 계약 목록 전수 표출 (구분 + 계약번호 + 과거이력 배지 일체형) -->
+                    <div class="space-y-1">
+                      ${contractItems.map(function(ci) {
+                        var cNo = ci.contract || '-';
+                        var isPlace = isPlaceholderContractNo(cNo);
+                        var isRec = (ci.type === 'inbound') || isRecoveryCategory(ci.category || '');
+                        var catText = isRec ? '회수' : '출고';
+                        var hist = !isPlace ? getContractPastHistoryInfo(cNo, r.ID, r.배송일자) : null;
+                        var pastCount = (hist && hist.count) ? hist.count : 0;
+
+                        return `
+                          <div class="flex items-center justify-between gap-1 bg-slate-50/90 hover:bg-indigo-50/70 px-1.5 py-0.5 rounded border border-slate-200 transition">
+                            <div class="flex items-center gap-1 min-w-0">
+                              <span class="px-1 py-0.2 rounded text-[8px] font-black ${isRec ? 'bg-purple-100 text-purple-800 border border-purple-200' : 'bg-blue-100 text-blue-800 border border-blue-200'} shrink-0">${catText}</span>
+                              ${!isPlace ? `
+                                <button type="button" onclick="openContractHistoryModal('${cNo}')" class="font-mono font-bold text-xs text-indigo-600 hover:text-indigo-900 hover:underline truncate max-w-[95px]" title="계약번호 [${cNo}] 과거 이력 조회">
+                                  ${cNo}
+                                </button>
+                              ` : `<span class="text-slate-400 text-xs font-sans font-bold">계약없음</span>`}
+                            </div>
+                            ${pastCount > 0 ? `
+                              <button type="button" onclick="openContractHistoryModal('${cNo}')" class="shrink-0 px-1.5 py-0.2 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[8.5px] flex items-center gap-0.5 cursor-pointer shadow-2xs" title="계약 [${cNo}] 과거 특이사항/메모 ${pastCount}건">
+                                <i class="fa-solid fa-clock-rotate-left text-[7.5px] text-amber-700"></i>
+                                <span>과거 ${pastCount}</span>
+                              </button>
+                            ` : ''}
+                          </div>
+                        `;
+                      }).join('')}
+                    </div>
                   </div>
                 `;
               }
-              return '';
+
+              // 단일 일반 건 렌더링
+              var histInfo = getContractPastHistoryInfo(r.계약번호, r.ID, r.배송일자);
+              return `
+                <div class="flex items-center gap-1.5 group/contract">
+                  ${!isPlaceholderContractNo(r.계약번호) ? `
+                    <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="text-indigo-600 hover:text-indigo-900 hover:underline font-bold text-xs flex items-center gap-1 truncate max-w-[110px]" title="계약번호 [${r.계약번호}] 과거 이력 및 현장 메모 조회">
+                      <span>${r.계약번호}</span>
+                      <i class="fa-solid fa-clock-rotate-left text-[10px] text-indigo-400"></i>
+                    </button>
+                  ` : (r.계약번호 === '계약번호 없음' || r.계약번호 === '[계약번호 없음]' || r.계약번호 === '신규등록' || r.isManual || r.source_sheet === '직접추가' || r.원본시트 === '직접추가') ? `
+                    <span class="text-slate-400 font-bold text-xs whitespace-nowrap font-sans">계약번호 없음</span>
+                  ` : `<span class="text-slate-400 text-xs">-</span>`}
+                  ${!isDriverUser ? `
+                    <button type="button" onclick="openQuickContractEditModal(${realIdx})" class="p-1 text-slate-300 hover:text-indigo-600 hover:bg-indigo-50 rounded transition" title="계약번호 수정/입력">
+                      <i class="fa-solid fa-pen-to-square text-[11px]"></i>
+                    </button>
+                  ` : ''}
+                </div>
+                ${(histInfo && histInfo.count > 0) ? `
+                  <div class="mt-1">
+                    <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="px-1.5 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[9.5px] inline-flex items-center gap-1 transition shadow-2xs cursor-pointer" title="과거 출고/배송 이력 ${histInfo.count}건 존재 (클릭 시 상세 이력 조회)">
+                      <i class="fa-solid fa-clock-rotate-left text-amber-700 text-[8.5px]"></i>
+                      <span>과거이력 ${histInfo.count}건</span>
+                    </button>
+                  </div>
+                ` : ''}
+              `;
             })()}
-            ${(histInfo && histInfo.count > 0) ? `
-              <div class="mt-1">
-                <button type="button" onclick="openContractHistoryModal('${r.계약번호}')" class="px-1.5 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded font-black text-[9.5px] inline-flex items-center gap-1 transition shadow-2xs cursor-pointer" title="과거 출고/배송 이력 ${histInfo.count}건 존재 (클릭 시 상세 이력 조회)">
-                  <i class="fa-solid fa-clock-rotate-left text-amber-700 text-[8.5px]"></i>
-                  <span>과거이력 ${histInfo.count}건</span>
-                </button>
-              </div>
-            ` : ''}
           </td>
           <td class="py-2.5 px-2">${categorySelectHtml}</td>
           <td class="py-2.5 px-2">${methodSelectHtml}</td>
@@ -9623,7 +9687,7 @@
           contract: cNo,
           category: cat,
           type: isRec ? 'inbound' : 'outbound',
-          actionLabel: isRec ? '고객에게서 받을 것 (회수/수거)' : '고객에게 줄 것 (출고/전달)',
+          actionLabel: isRec ? '회수' : '출고',
           actionIcon: isRec ? '📦' : '🚚',
           items: itm
         };
@@ -9819,7 +9883,70 @@
       }
     }
 
-    async function unmergeDeliveryBundle(masterId) {
+    
+    async function unmergeSelectedDeliveries() {
+      var selectedCheckboxes = document.querySelectorAll('.row-checkbox:checked');
+      var masterIds = [];
+      selectedCheckboxes.forEach(function(cb) {
+        var id = cb.getAttribute('data-id');
+        var rec = records.find(function(r) { return r.ID == id; });
+        if (rec) {
+          var b = parseBundleInfo(rec);
+          if (b && b.role === 'master' && !masterIds.includes(rec.ID)) {
+            masterIds.push(rec.ID);
+          }
+        }
+      });
+
+      if (masterIds.length === 0) {
+        if (typeof Swal !== 'undefined') {
+          Swal.fire({
+            icon: 'info',
+            title: '선택된 묶음 건 없음',
+            text: '체크된 항목 중 해제할 수 있는 묶음 배송 건이 없습니다.'
+          });
+        } else {
+          alert('체크된 항목 중 해제할 수 있는 묶음 배송 건이 없습니다.');
+        }
+        return;
+      }
+
+      var isConfirmed = false;
+      if (typeof Swal !== 'undefined') {
+        var res = await Swal.fire({
+          title: '선택 묶음 일괄 해제',
+          html: `선택된 <b>${masterIds.length}곳의 묶음 배송지</b>를 원래의 개별 건들로 모두 분리하시겠습니까?`,
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: '🔗 일괄 해제',
+          cancelButtonText: '취소',
+          confirmButtonColor: '#e11d48'
+        });
+        isConfirmed = res.isConfirmed;
+      } else {
+        isConfirmed = confirm(`선택된 ${masterIds.length}곳의 묶음 배송지를 원래의 개별 건들로 모두 분리하시겠습니까?`);
+      }
+
+      if (!isConfirmed) return;
+
+      for (var i = 0; i < masterIds.length; i++) {
+        await unmergeDeliveryBundle(masterIds[i], true);
+      }
+
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          icon: 'success',
+          title: '일괄 해제 완료',
+          text: `${masterIds.length}곳의 묶음 배송이 개별 건으로 분리되었습니다.`,
+          timer: 1500,
+          showConfirmButton: false
+        });
+      }
+      clearTableSelection();
+      renderTable();
+    }
+
+async function unmergeDeliveryBundle(masterId, silent) {
       var masterRecord = records.find(function(r) { return r.ID == masterId; });
       if (!masterRecord) return;
       var bInfo = parseBundleInfo(masterRecord);
@@ -9828,23 +9955,24 @@
       var subIds = bInfo.subIds || [];
       var totalCount = subIds.length + 1;
 
-      var isConfirmed = false;
-      if (typeof Swal !== 'undefined') {
-        var res = await Swal.fire({
-          title: '묶음 배송 해제',
-          html: `현재 묶여 있는 <b>${totalCount}개 계약 건</b>을 다시 원래의 개별 배송 건으로 분리하시겠습니까?`,
-          icon: 'warning',
-          showCancelButton: true,
-          confirmButtonText: '🔗 묶음 해제 (개별 건으로 분리)',
-          cancelButtonText: '취소',
-          confirmButtonColor: '#e11d48'
-        });
-        isConfirmed = res.isConfirmed;
-      } else {
-        isConfirmed = confirm(`현재 묶여 있는 ${totalCount}개 계약 건을 다시 원래의 개별 배송 건으로 분리하시겠습니까?`);
+      if (!silent) {
+        var isConfirmed = false;
+        if (typeof Swal !== 'undefined') {
+          var res = await Swal.fire({
+            title: '묶음 배송 해제',
+            html: `현재 묶여 있는 <b>${totalCount}개 계약 건</b>을 다시 원래의 개별 배송 건으로 분리하시겠습니까?`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: '🔗 묶음 해제 (개별 건으로 분리)',
+            cancelButtonText: '취소',
+            confirmButtonColor: '#e11d48'
+          });
+          isConfirmed = res.isConfirmed;
+        } else {
+          isConfirmed = confirm(`현재 묶여 있는 ${totalCount}개 계약 건을 다시 원래의 개별 배송 건으로 분리하시겠습니까?`);
+        }
+        if (!isConfirmed) return;
       }
-
-      if (!isConfirmed) return;
 
       // 1. 로컬 메모리 상태 즉각 원복 (0.1초 즉시 반응)
       var masterSpecialObj = {};
@@ -9967,7 +10095,7 @@
               <div class="p-2.5 bg-blue-50/90 border border-blue-200 rounded-xl space-y-1">
                 <div class="text-xs font-black text-blue-950 flex items-center gap-1.5">
                   <span class="w-4 h-4 rounded bg-blue-600 text-white flex items-center justify-center text-[9px]">1</span>
-                  <span>🚚 고객에게 줄 것 (출고 / 전달)</span>
+                  <span>🚚 출고</span>
                   ${bInfo.outboundContracts ? `<span class="text-[9.5px] font-mono text-blue-700 ml-auto">계약: ${bInfo.outboundContracts.join(', ')}</span>` : ''}
                 </div>
                 <div class="bg-white p-2 rounded-lg border border-blue-100 font-black text-blue-950 text-xs">
@@ -9978,7 +10106,7 @@
               <div class="p-2.5 bg-purple-50/90 border border-purple-200 rounded-xl space-y-1">
                 <div class="text-xs font-black text-purple-950 flex items-center gap-1.5">
                   <span class="w-4 h-4 rounded bg-purple-600 text-white flex items-center justify-center text-[9px]">2</span>
-                  <span>📦 고객에게서 받을 것 (회수 / 수거)</span>
+                  <span>📦 회수</span>
                   ${bInfo.inboundContracts ? `<span class="text-[9.5px] font-mono text-purple-700 ml-auto">계약: ${bInfo.inboundContracts.join(', ')}</span>` : ''}
                 </div>
                 <div class="bg-white p-2 rounded-lg border border-purple-100 font-black text-purple-950 text-xs">

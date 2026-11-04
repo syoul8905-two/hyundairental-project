@@ -4112,11 +4112,20 @@
         var contractList = [];
         var placeholderCustList = [];
         rows.forEach(function(r) {
-          var cNo = (r.contract_no || '').trim();
+          var bInfo = parseMobileBundleInfo(r);
+          var contracts = (bInfo && bInfo.contracts && bInfo.contracts.length > 0)
+            ? bInfo.contracts
+            : [(r.contract_no || '').trim()];
+
+          contracts.forEach(function(cNo) {
+            cNo = (cNo || '').trim();
+            if (!isPlaceholderContractNo(cNo)) {
+              if (!pastDeliveryNotesMap.has(cNo) && !contractList.includes(cNo)) contractList.push(cNo);
+            }
+          });
+
           var cName = (r.customer_name || '').trim();
-          if (!isPlaceholderContractNo(cNo)) {
-            if (!pastDeliveryNotesMap.has(cNo) && !contractList.includes(cNo)) contractList.push(cNo);
-          } else if (cName) {
+          if (isPlaceholderContractNo(r.contract_no) && cName) {
             if (!pastDeliveryNotesByCustomerMap.has(cName) && !placeholderCustList.includes(cName)) placeholderCustList.push(cName);
           }
         });
@@ -4190,7 +4199,108 @@
       }
     }
 
-    function getPastDeliveryInfoForRecord(r) {
+    
+    function getAllPastDeliveryInfosForRecord(r) {
+      if (!r) return [];
+      var bInfo = parseMobileBundleInfo(r);
+      var contracts = (bInfo && bInfo.contracts && bInfo.contracts.length > 0)
+        ? bInfo.contracts
+        : [(r.contract_no || '').trim()];
+
+      var results = [];
+      contracts.forEach(function(cNo) {
+        cNo = (cNo || '').trim();
+        if (!isPlaceholderContractNo(cNo) && pastDeliveryNotesMap.has(cNo)) {
+          var info = pastDeliveryNotesMap.get(cNo);
+          if (info && (!r.id || info.id !== r.id)) {
+            results.push({ contractNo: cNo, note: info });
+          }
+        }
+      });
+      return results;
+    }
+
+    async function unmergeDeliveryBundleMobile(masterId) {
+      if (!masterId) return;
+      var r = driverRecords.find(function(rec) { return rec.id == masterId; });
+      if (!r) return;
+      var bInfo = parseMobileBundleInfo(r);
+      if (!bInfo || bInfo.role !== 'master') return;
+
+      var subCount = (bInfo.subIds ? bInfo.subIds.length : (bInfo.contracts ? bInfo.contracts.length - 1 : 1));
+      if (!confirm(`🔗 [${r.customer_name}] 묶음 배송(${subCount + 1}건)을 개별 배송 건으로 분리(해제)하시겠습니까?`)) {
+        return;
+      }
+
+      showToast('⏳ [서버 전송 중] 묶음 배송 해제 처리 중...');
+      try {
+        var origItems = bInfo.originalItems || (bInfo.isMixed ? (bInfo.outboundItems || r.items) : r.items);
+        var origCat = bInfo.originalCategory || (bInfo.isMixed ? '출고' : r.category);
+
+        var curObj = {};
+        if (r.memo_special) {
+          try { curObj = JSON.parse(r.memo_special); } catch(e) {}
+        }
+        delete curObj.bundle_id;
+        delete curObj.bundle_role;
+        delete curObj.bundle_count;
+        delete curObj.bundle_sub_ids;
+        delete curObj.bundle_contracts;
+        delete curObj.bundle_customer;
+        delete curObj.bundle_addr;
+        delete curObj.original_items;
+        delete curObj.original_category;
+        delete curObj.merged_items;
+        delete curObj.is_mixed;
+        delete curObj.has_outbound;
+        delete curObj.has_inbound;
+        delete curObj.outbound_items;
+        delete curObj.outbound_contracts;
+        delete curObj.inbound_items;
+        delete curObj.inbound_contracts;
+        delete curObj.contract_details;
+        delete curObj.bundled_at;
+
+        if (supabaseClient) {
+          // Update master
+          await supabaseClient.from('delivery_schedules').update({
+            items: origItems,
+            category: origCat,
+            memo_special: JSON.stringify(curObj)
+          }).eq('id', masterId);
+
+          // Update subs
+          if (bInfo.subIds && bInfo.subIds.length > 0) {
+            for (var i = 0; i < bInfo.subIds.length; i++) {
+              var sId = bInfo.subIds[i];
+              var subRec = allMobileRows.find(function(row) { return row.id == sId; });
+              var subObj = {};
+              if (subRec && subRec.memo_special) {
+                try { subObj = JSON.parse(subRec.memo_special); } catch(e) {}
+              }
+              delete subObj.bundle_id;
+              delete subObj.bundle_role;
+              delete subObj.bundle_master_id;
+              delete subObj.bundle_contracts;
+              delete subObj.original_items;
+              delete subObj.bundled_at;
+
+              await supabaseClient.from('delivery_schedules').update({
+                memo_special: JSON.stringify(subObj)
+              }).eq('id', sId);
+            }
+          }
+        }
+
+        showToast('🔗 [' + r.customer_name + '] 묶음 배송이 성공적으로 해제되었습니다.');
+        loadMobileData(false);
+      } catch(err) {
+        console.error('Error unmerging mobile bundle:', err);
+        alert('⚠️ 묶음 해제 중 오류가 발생했습니다: ' + (err.message || err));
+      }
+    }
+
+function getPastDeliveryInfoForRecord(r) {
       if (!r) return null;
       var cNo = (r.contract_no || '').trim();
       var info = null;
@@ -4707,7 +4817,14 @@
                   ${isQuick ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-200">⚡ 퀵</span>' : ''}
                   ${isPickup ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-200">🏢 방문수령</span>' : ''}
                   ${isParcel ? '<span class="px-2 py-0.5 rounded text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-200">📮 택배출고</span>' : ''}
-                  ${(bInfo && bInfo.role === 'master') ? `<span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-link text-[9px] text-purple-600"></i> 묶음배송 ${(bInfo.contracts && bInfo.contracts.length) || (bInfo.subIds.length + 1)}건</span>` : ''}
+                  ${(bInfo && bInfo.role === 'master') ? `
+                    <div class="flex items-center gap-1">
+                      <span class="px-2 py-0.5 rounded text-[10px] font-black bg-purple-100 text-purple-800 border border-purple-300 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-link text-[9px] text-purple-600"></i> 묶음 ${(bInfo.contracts && bInfo.contracts.length) || (bInfo.subIds.length + 1)}건</span>
+                      <button type="button" onclick="event.stopPropagation(); unmergeDeliveryBundleMobile(${r.id})" class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 active:scale-95 transition flex items-center gap-0.5 shadow-2xs cursor-pointer" title="개별 배송 건으로 묶음 해제">
+                        <i class="fa-solid fa-link-slash text-[8.5px]"></i> 묶음해제
+                      </button>
+                    </div>
+                  ` : ''}
                   <span class="text-[10px] text-slate-400 font-bold">${r.visit_time || '방문시간 무관'}</span>
                   ${r.driver_name ? `<span class="text-[9.5px] bg-slate-100 text-slate-600 px-1.5 py-0.2 rounded font-bold">${r.driver_name}</span>` : ''}
                 </div>
@@ -4752,7 +4869,7 @@
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-1.5">
                     <span class="w-5 h-5 rounded-md bg-blue-600 text-white flex items-center justify-center text-[10px] font-black">1</span>
-                    <span class="text-xs font-black text-blue-950">🚚 고객에게 줄 것 (출고 / 전달)</span>
+                    <span class="text-xs font-black text-blue-950">🚚 출고</span>
                   </div>
                   ${bInfo.outboundContracts && bInfo.outboundContracts.length ? `<span class="text-[10px] font-mono font-bold bg-blue-200/80 text-blue-950 px-2 py-0.5 rounded-full border border-blue-300">계약: ${bInfo.outboundContracts.join(', ')}</span>` : ''}
                 </div>
@@ -4773,7 +4890,7 @@
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-1.5">
                     <span class="w-5 h-5 rounded-md bg-purple-600 text-white flex items-center justify-center text-[10px] font-black">2</span>
-                    <span class="text-xs font-black text-purple-950">📦 고객에게서 받을 것 (회수 / 수거)</span>
+                    <span class="text-xs font-black text-purple-950">📦 회수</span>
                   </div>
                   ${bInfo.inboundContracts && bInfo.inboundContracts.length ? `<span class="text-[10px] font-mono font-bold bg-purple-200/80 text-purple-950 px-2 py-0.5 rounded-full border border-purple-300">계약: ${bInfo.inboundContracts.join(', ')}</span>` : ''}
                 </div>
@@ -4801,53 +4918,65 @@
 
           <!-- Field Issue Memo & Photo Section (독립 바텀시트 모달 연동) -->
           <div class="space-y-2">
-            ${(pastInfo && (pastInfo.issue || pastInfo.photo || (pastInfo.inspectPhotos && pastInfo.inspectPhotos.length > 0))) ? `
-              <div class="p-3 bg-gradient-to-r from-amber-50 via-amber-50/80 to-orange-50 border-2 border-amber-400 rounded-2xl space-y-2 shadow-xs">
-                <div class="flex items-center justify-between">
-                  <span class="text-[11.5px] font-black text-amber-950 flex items-center gap-1.5">
-                    <i class="fa-solid fa-bell text-amber-600 animate-bounce"></i>
-                    <span>🚨 출고 당시 기사 특이사항</span>
-                  </span>
-                  <span class="text-[9.5px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold border border-amber-300 shadow-2xs">
-                    ${pastInfo.contract_no ? `[${pastInfo.contract_no}] ` : ''}${pastInfo.driver_name ? (pastInfo.driver_name + ' 기사 · ') : ''}${pastInfo.delivery_date || '이전 출고'}
-                  </span>
-                </div>
-                ${pastInfo.issue ? `
-                  <div class="p-2.5 bg-white/95 rounded-xl border border-amber-200 shadow-2xs">
-                    <p class="text-xs font-black text-amber-950 break-all whitespace-pre-line leading-relaxed">
-                      ${pastInfo.issue}
-                    </p>
-                  </div>
-                ` : ''}
-                ${pastInfo.photo ? `
-                  <div class="bg-white/95 p-2.5 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/60 active:scale-99 transition shadow-2xs space-y-1.5" onclick="event.stopPropagation(); openPastDeliveryCardPhoto(${idx})">
-                    <div class="flex items-center justify-between">
-                      <span class="text-[11px] font-black text-amber-950 flex items-center gap-1">
-                        <i class="fa-solid fa-camera text-amber-600"></i> 출고 당시 설치/현장 사진
-                      </span>
-                      <span class="text-[10px] text-indigo-700 font-bold flex items-center gap-0.5 underline">
-                        전체화면 확대 <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>
-                      </span>
-                    </div>
-                    <div class="relative w-full h-44 overflow-hidden rounded-xl border border-amber-300 bg-slate-900/5">
-                      <img src="${pastInfo.photo}" class="w-full h-full object-cover" alt="출고 당시 설치 사진">
-                      <div class="absolute bottom-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-xs font-bold flex items-center gap-1">
-                        <i class="fa-solid fa-magnifying-glass-plus"></i> 터치하여 확대
-                      </div>
-                    </div>
-                  </div>
-                ` : ''}
-                ${(Array.isArray(pastInfo.inspectPhotos) && pastInfo.inspectPhotos.length > 0) ? `
-                  <div class="flex items-center justify-between bg-amber-100/60 px-2.5 py-1.5 rounded-xl border border-amber-200">
-                    <span class="text-[10px] text-amber-900 font-bold">📦 출고 검수 사진 (${pastInfo.inspectPhotos.length}장 보관)</span>
-                    <button type="button" onclick="event.stopPropagation(); openPastDeliveryInspectGallery(${idx}, 0)" class="text-[10px] font-black text-indigo-700 bg-white px-2 py-0.5 rounded-lg border border-amber-300 shadow-2xs hover:bg-amber-50">
-                      검수사진 확인 ↗
-                    </button>
-                  </div>
-                ` : ''}
-              </div>
-            ` : ''}
+            ${(function() {
+              var pastList = getAllPastDeliveryInfosForRecord(r);
+              if (pastList.length === 0 && pastInfo && (pastInfo.issue || pastInfo.photo || (pastInfo.inspectPhotos && pastInfo.inspectPhotos.length > 0))) {
+                pastList = [{ contractNo: pastInfo.contract_no, note: pastInfo }];
+              }
+              if (pastList.length === 0) return '';
 
+              return pastList.map(function(item) {
+                var p = item.note;
+                if (!p || (!p.issue && !p.photo && (!p.inspectPhotos || p.inspectPhotos.length === 0))) return '';
+                var cTag = item.contractNo ? `[${item.contractNo}] ` : '';
+                return `
+                  <div class="p-3 bg-gradient-to-r from-amber-50 via-amber-50/80 to-orange-50 border-2 border-amber-400 rounded-2xl space-y-2 shadow-xs">
+                    <div class="flex items-center justify-between">
+                      <span class="text-[11.5px] font-black text-amber-950 flex items-center gap-1.5">
+                        <i class="fa-solid fa-bell text-amber-600 animate-bounce"></i>
+                        <span>🚨 과거 기사 특이사항</span>
+                      </span>
+                      <span class="text-[9.5px] bg-amber-200 text-amber-950 px-2 py-0.5 rounded-full font-bold border border-amber-300 shadow-2xs font-mono">
+                        ${cTag}${p.driver_name ? (p.driver_name + ' 기사 · ') : ''}${p.delivery_date || '이전 출고'}
+                      </span>
+                    </div>
+                    ${p.issue ? `
+                      <div class="p-2.5 bg-white/95 rounded-xl border border-amber-200 shadow-2xs">
+                        <p class="text-xs font-black text-amber-950 break-all whitespace-pre-line leading-relaxed">
+                          ${p.issue}
+                        </p>
+                      </div>
+                    ` : ''}
+                    ${p.photo ? `
+                      <div class="bg-white/95 p-2.5 rounded-xl border border-amber-200 cursor-pointer hover:bg-amber-100/60 active:scale-99 transition shadow-2xs space-y-1.5" onclick="event.stopPropagation(); openMobilePhotoModal('${p.photo}', '${(r.customer_name || '현장') + ' ' + cTag + ' 당시 사진 (' + (p.delivery_date || '') + ')'}')">
+                        <div class="flex items-center justify-between">
+                          <span class="text-[11px] font-black text-amber-950 flex items-center gap-1">
+                            <i class="fa-solid fa-camera text-amber-600"></i> 과거 설치/현장 사진
+                          </span>
+                          <span class="text-[10px] text-indigo-700 font-bold flex items-center gap-0.5 underline">
+                            전체화면 확대 <i class="fa-solid fa-arrow-up-right-from-square text-[8px]"></i>
+                          </span>
+                        </div>
+                        <div class="relative w-full h-44 overflow-hidden rounded-xl border border-amber-300 bg-slate-900/5">
+                          <img src="${p.photo}" class="w-full h-full object-cover" alt="과거 현장 사진">
+                          <div class="absolute bottom-2 right-2 bg-slate-900/70 text-white text-[10px] px-2 py-0.5 rounded-full backdrop-blur-xs font-bold flex items-center gap-1">
+                            <i class="fa-solid fa-magnifying-glass-plus"></i> 터치하여 확대
+                          </div>
+                        </div>
+                      </div>
+                    ` : ''}
+                    ${(Array.isArray(p.inspectPhotos) && p.inspectPhotos.length > 0) ? `
+                      <div class="flex items-center justify-between bg-amber-100/60 px-2.5 py-1.5 rounded-xl border border-amber-200">
+                        <span class="text-[10px] text-amber-900 font-bold">📦 과거 출고 검수 사진 (${p.inspectPhotos.length}장 보관)</span>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('');
+            })()}
+          </div>
+
+          <div class="space-y-2">
             ${(times.issue || (times.photos && times.photos.length > 0) || times.photo) ? `
               <div onclick="openMobileMemoModal(${idx})" class="p-2.5 bg-amber-50/90 border border-amber-200 rounded-xl space-y-1.5 cursor-pointer hover:bg-amber-100/80 active:scale-99 transition shadow-2xs">
                 <div class="flex items-center justify-between">
