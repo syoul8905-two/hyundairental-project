@@ -1652,6 +1652,27 @@
     const SUPABASE_ANON_KEY = "sb_publishable_qh_IwdK0gr0wl9hO1VScTA_NDTzFZSf";
     const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
+    // ==========================================
+    // [Safe Replace] 신규 행 선(先)저장 → 저장 성공 시에만 기존 행 삭제
+    // 저장 실패 시 기존 데이터 100% 보존 (2026-11-05 ID 시퀀스 충돌 데이터 소실 사고 재발 방지)
+    // applyOldFilter: 교체 대상 기존 행을 고르는 필터 함수 (예: function(q) { return q.eq('source_sheet', 'X'); })
+    // ==========================================
+    async function safeReplaceRows(applyOldFilter, newRows) {
+      if (!supabaseClient) throw new Error('Supabase client not initialized');
+      var oldRes = await applyOldFilter(supabaseClient.from('delivery_schedules').select('id'));
+      if (oldRes.error) throw oldRes.error;
+      var oldIds = (oldRes.data || []).map(function(r) { return r.id; });
+      var insRes = await supabaseClient.from('delivery_schedules').insert(newRows).select('id');
+      if (insRes.error) throw insRes.error;
+      var newIds = (insRes.data || []).map(function(r) { return r.id; });
+      var toDelete = oldIds.filter(function(id) { return newIds.indexOf(id) === -1; });
+      for (var i = 0; i < toDelete.length; i += 100) {
+        var delRes = await supabaseClient.from('delivery_schedules').delete().in('id', toDelete.slice(i, i + 100));
+        if (delRes.error) throw delRes.error;
+      }
+      return { inserted: newIds.length, deleted: toDelete.length };
+    }
+
     // State Variables
     var _initNow = new Date();
     var currentSelectedVehicleNo = "801부8744";
@@ -1805,11 +1826,7 @@
         }
         var payload = Object.assign({}, existingConfig, { vehicles: vehiclesMaster, quick_drivers: quickDriverList });
 
-        await supabaseClient.from('delivery_schedules')
-          .delete()
-          .eq('source_sheet', 'SYSTEM_CONFIG_VEHICLES');
-
-        await supabaseClient.from('delivery_schedules').insert([{
+        await safeReplaceRows(function(q) { return q.eq('source_sheet', 'SYSTEM_CONFIG_VEHICLES'); }, [{
           customer_name: 'SYSTEM_CONFIG_VEHICLES',
           source_sheet: 'SYSTEM_CONFIG_VEHICLES',
           memo_full: JSON.stringify(payload),
@@ -3910,10 +3927,7 @@
                 });
                 if (cChanged) {
                   localStorage.setItem('DELIVERY_AUTH_USERS_V3', JSON.stringify(cloudUsers));
-                  await supabaseClient.from('delivery_schedules')
-                    .delete()
-                    .eq('source_sheet', 'SYSTEM_CONFIG_USERS');
-                  await supabaseClient.from('delivery_schedules').insert([{
+                  await safeReplaceRows(function(q) { return q.eq('source_sheet', 'SYSTEM_CONFIG_USERS'); }, [{
                     customer_name: 'SYSTEM_CONFIG_USERS',
                     source_sheet: 'SYSTEM_CONFIG_USERS',
                     memo_full: JSON.stringify(cloudUsers),
@@ -5773,15 +5787,7 @@
             });
           }
 
-          // 1. Delete existing VEHICLE_TRIP_LOGS for this vehicle and month
-          await supabaseClient.from('delivery_schedules')
-            .delete()
-            .eq('source_sheet', 'VEHICLE_TRIP_LOGS')
-            .eq('customer_name', currentSelectedVehicleNo)
-            .gte('delivery_date', `${monthPrefix}-01`)
-            .lte('delivery_date', `${monthPrefix}-${daysInMonth}`);
-
-          // 2. Insert new batch
+          // 1~2. [Safe Replace] 신규 일지 선저장 → 저장 성공 시에만 기존 당월 일지 삭제 (저장 실패 시 기존 일지 보존)
           var defaultDriver = document.getElementById('autoDistributeDriverText').innerText.trim() || '이주봉';
           var rowsToInsert = cachedAutoDistributedLogs.map(function(item) {
             var exist = existingFeesMap[item.trip_date] || { parking_fee: 0, fuel_fee: 0, stopFees: {} };
@@ -5839,8 +5845,12 @@
             };
           });
 
-          var insRes = await supabaseClient.from('delivery_schedules').insert(rowsToInsert);
-          if (insRes.error) throw insRes.error;
+          await safeReplaceRows(function(q) {
+            return q.eq('source_sheet', 'VEHICLE_TRIP_LOGS')
+              .eq('customer_name', currentSelectedVehicleNo)
+              .gte('delivery_date', `${monthPrefix}-01`)
+              .lte('delivery_date', `${monthPrefix}-${daysInMonth}`);
+          }, rowsToInsert);
 
           // 3. Update vehiclesMaster current_km if needed
           var vIdx = vehiclesMaster.findIndex(function(v) { return v.vehicle_no === currentSelectedVehicleNo; });
@@ -6488,12 +6498,7 @@
 
       if (supabaseClient) {
         try {
-          await supabaseClient.from('delivery_schedules')
-            .delete()
-            .eq('source_sheet', 'SYSTEM_CONFIG_MAINTENANCE_INTERVALS');
-
-          await supabaseClient.from('delivery_schedules')
-            .insert([{
+          await safeReplaceRows(function(q) { return q.eq('source_sheet', 'SYSTEM_CONFIG_MAINTENANCE_INTERVALS'); }, [{
               delivery_date: '2099-12-31',
               customer_name: 'SYSTEM_CONFIG_MAINTENANCE_INTERVALS',
               source_sheet: 'SYSTEM_CONFIG_MAINTENANCE_INTERVALS',

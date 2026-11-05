@@ -2573,6 +2573,27 @@
     const supabaseClient = window.supabase ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
     // ==========================================
+    // [Safe Replace] 신규 행 선(先)저장 → 저장 성공 시에만 기존 행 삭제
+    // 저장 실패 시 기존 데이터 100% 보존 (2026-11-05 ID 시퀀스 충돌 데이터 소실 사고 재발 방지)
+    // applyOldFilter: 교체 대상 기존 행을 고르는 필터 함수 (예: function(q) { return q.eq('source_sheet', 'X'); })
+    // ==========================================
+    async function safeReplaceRows(applyOldFilter, newRows) {
+      if (!supabaseClient) throw new Error('Supabase client not initialized');
+      var oldRes = await applyOldFilter(supabaseClient.from('delivery_schedules').select('id'));
+      if (oldRes.error) throw oldRes.error;
+      var oldIds = (oldRes.data || []).map(function(r) { return r.id; });
+      var insRes = await supabaseClient.from('delivery_schedules').insert(newRows).select('id');
+      if (insRes.error) throw insRes.error;
+      var newIds = (insRes.data || []).map(function(r) { return r.id; });
+      var toDelete = oldIds.filter(function(id) { return newIds.indexOf(id) === -1; });
+      for (var i = 0; i < toDelete.length; i += 100) {
+        var delRes = await supabaseClient.from('delivery_schedules').delete().in('id', toDelete.slice(i, i + 100));
+        if (delRes.error) throw delRes.error;
+      }
+      return { inserted: newIds.length, deleted: toDelete.length };
+    }
+
+    // ==========================================
     // 0. User Authentication & RBAC Engine
     // ==========================================
     const DEFAULT_AUTH_USERS = [
@@ -2636,10 +2657,7 @@
       saveAuthUsersLocally();
       if (!supabaseClient) return;
       try {
-        await supabaseClient.from('delivery_schedules')
-          .delete()
-          .eq('source_sheet', 'SYSTEM_CONFIG_USERS');
-        await supabaseClient.from('delivery_schedules').insert([{
+        await safeReplaceRows(function(q) { return q.eq('source_sheet', 'SYSTEM_CONFIG_USERS'); }, [{
           customer_name: 'SYSTEM_CONFIG_USERS',
           source_sheet: 'SYSTEM_CONFIG_USERS',
           memo_full: JSON.stringify(authUsers),
@@ -3967,10 +3985,7 @@
         var bases = getRegisteredBases();
         var daily = getDailyOrigins();
         var payload = { bases: bases, daily: daily };
-        await supabaseClient.from('delivery_schedules')
-          .delete()
-          .eq('source_sheet', 'SYSTEM_CONFIG_DRIVER_ORIGINS');
-        await supabaseClient.from('delivery_schedules').insert([{
+        await safeReplaceRows(function(q) { return q.eq('source_sheet', 'SYSTEM_CONFIG_DRIVER_ORIGINS'); }, [{
           customer_name: 'SYSTEM_CONFIG_DRIVER_ORIGINS',
           source_sheet: 'SYSTEM_CONFIG_DRIVER_ORIGINS',
           memo_full: JSON.stringify(payload),
@@ -8328,43 +8343,46 @@
           var cleanTargetDate = targetDate.replace(/\./g, '-');
           var shortTargetDate = targetDate.replace(/-/g, '.');
 
-          // [핵심 방어] 해당 일자 구버전 스케줄만 삭제하며, 법인차량 데이터(VEHICLE_%), A/S 기록(AS_RECORDS) 및 시스템 설정(SYSTEM_CONFIG_%)은 절대 삭제되지 않도록 엄격 보호
-          await supabaseClient.from('delivery_schedules')
-            .delete()
-            .eq('delivery_date', targetDate)
-            .neq('source_sheet', 'AS_RECORDS')
-            .not('source_sheet', 'like', 'VEHICLE_%')
-            .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
-            .not('customer_name', 'like', 'VEHICLE_%')
-            .not('customer_name', 'like', 'SYSTEM_CONFIG_%');
-
-          if (cleanTargetDate !== targetDate) {
-            await supabaseClient.from('delivery_schedules')
-              .delete()
-              .eq('delivery_date', cleanTargetDate)
+          // [Safe Replace] 해당 일자 구버전 스케줄 id를 먼저 조회만 해두고, 신규 일정 저장이 성공한 경우에만 삭제
+          // (법인차량 데이터(VEHICLE_%), A/S 기록(AS_RECORDS), 시스템 설정(SYSTEM_CONFIG_%)은 기존과 동일하게 절대 삭제 대상 제외)
+          var oldIdSet = {};
+          var dateVariants = [targetDate, cleanTargetDate, shortTargetDate].filter(function(v, i, arr) { return v && arr.indexOf(v) === i; });
+          for (var dv = 0; dv < dateVariants.length; dv++) {
+            var oldByDate = await supabaseClient.from('delivery_schedules')
+              .select('id')
+              .eq('delivery_date', dateVariants[dv])
               .neq('source_sheet', 'AS_RECORDS')
               .not('source_sheet', 'like', 'VEHICLE_%')
               .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
               .not('customer_name', 'like', 'VEHICLE_%')
               .not('customer_name', 'like', 'SYSTEM_CONFIG_%');
+            if (oldByDate.error) throw oldByDate.error;
+            (oldByDate.data || []).forEach(function(r) { oldIdSet[r.id] = true; });
           }
-          if (shortTargetDate !== targetDate) {
-            await supabaseClient.from('delivery_schedules')
-              .delete()
-              .eq('delivery_date', shortTargetDate)
+          var sheetVariants = [targetDate, shortTargetDate].filter(function(v, i, arr) { return v && arr.indexOf(v) === i; });
+          for (var sv = 0; sv < sheetVariants.length; sv++) {
+            var oldBySheet = await supabaseClient.from('delivery_schedules')
+              .select('id')
+              .eq('source_sheet', sheetVariants[sv])
               .neq('source_sheet', 'AS_RECORDS')
               .not('source_sheet', 'like', 'VEHICLE_%')
-              .not('source_sheet', 'like', 'SYSTEM_CONFIG_%')
-              .not('customer_name', 'like', 'VEHICLE_%')
-              .not('customer_name', 'like', 'SYSTEM_CONFIG_%');
+              .not('source_sheet', 'like', 'SYSTEM_CONFIG_%');
+            if (oldBySheet.error) throw oldBySheet.error;
+            (oldBySheet.data || []).forEach(function(r) { oldIdSet[r.id] = true; });
           }
-          await supabaseClient.from('delivery_schedules').delete().eq('source_sheet', targetDate).neq('source_sheet', 'AS_RECORDS').not('source_sheet', 'like', 'VEHICLE_%').not('source_sheet', 'like', 'SYSTEM_CONFIG_%');
-          await supabaseClient.from('delivery_schedules').delete().eq('source_sheet', shortTargetDate).neq('source_sheet', 'AS_RECORDS').not('source_sheet', 'like', 'VEHICLE_%').not('source_sheet', 'like', 'SYSTEM_CONFIG_%');
 
-          var res = await supabaseClient.from('delivery_schedules').insert(payload);
+          var res = await supabaseClient.from('delivery_schedules').insert(payload).select('id');
           if (res.error) {
             console.warn('Supabase insert warning:', res.error);
+            alert('⚠️ 클라우드 DB 저장에 실패했습니다.\n\n기존 일정은 삭제되지 않고 그대로 유지됩니다.\n잠시 후 CSV를 다시 등록해 주세요.\n\n(오류: ' + (res.error.message || res.error.code || res.error) + ')');
           } else {
+            var newIdMap = {};
+            (res.data || []).forEach(function(r) { newIdMap[r.id] = true; });
+            var staleIds = Object.keys(oldIdSet).map(Number).filter(function(id) { return !newIdMap[id]; });
+            for (var di = 0; di < staleIds.length; di += 100) {
+              var delRes = await supabaseClient.from('delivery_schedules').delete().in('id', staleIds.slice(di, di + 100));
+              if (delRes.error) console.warn('Old schedule cleanup warning:', delRes.error);
+            }
             showToast('💾 Supabase DB에 ' + payload.length + '건 클라우드 갱신 완료! (기존 운행시간 완벽 보존)');
             await loadAvailableDates();
             await triggerSync(true);
