@@ -7,8 +7,8 @@ import datetime
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-SUPABASE_URL = "https://gideypynmhpjucgszyce.supabase.co"
-SUPABASE_KEY = "sb_publishable_pLF_neZMUjj3G7PsiH_tuw_rfRuu8eP"
+SUPABASE_URL = "https://svlnzabdmncovosmxjxy.supabase.co"
+SUPABASE_KEY = "sb_publishable_qh_IwdK0gr0wl9hO1VScTA_NDTzFZSf"
 
 HEADERS = {
     "apikey": SUPABASE_KEY,

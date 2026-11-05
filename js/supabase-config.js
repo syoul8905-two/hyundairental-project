@@ -7,8 +7,8 @@
 (function(window) {
   'use strict';
 
-  var SUPABASE_URL = "https://gideypynmhpjucgszyce.supabase.co";
-  var SUPABASE_ANON_KEY = "sb_publishable_pLF_neZMUjj3G7PsiH_tuw_rfRuu8eP";
+  var SUPABASE_URL = "https://svlnzabdmncovosmxjxy.supabase.co";
+  var SUPABASE_ANON_KEY = "sb_publishable_qh_IwdK0gr0wl9hO1VScTA_NDTzFZSf";
 
   var clientInstance = null;
 
