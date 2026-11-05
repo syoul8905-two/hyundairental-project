@@ -1161,7 +1161,7 @@
           <div>
             <label class="block text-[11px] font-bold text-slate-600 mb-1">담당 기사 배정</label>
             <div class="flex items-center gap-1.5">
-              <input type="text" id="editDriver" placeholder="예: 조경찬" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-bold text-amber-700">
+              <input type="text" id="editDriver" placeholder="예: 이주봉" class="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs focus:outline-none focus:border-indigo-500 font-bold text-amber-700">
               <select id="editDriverQuickSelect" onchange="if(this.value){document.getElementById('editDriver').value=this.value;}" class="px-1.5 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-xs font-semibold text-slate-600 cursor-pointer">
                 <option value="">선택...</option>
               </select>
@@ -2357,7 +2357,7 @@
         </p>
         <p class="text-[10px] text-indigo-700 font-medium">
           • <b>관리자</b>: 최두성, 이성호, 장종순, 박종환 (비번: 1234)<br>
-          • <b>배송기사</b>: 김승지, 조경찬 (비번: 1234)
+          • <b>배송기사</b>: 이주봉 (비번: 1234)
         </p>
       </div>
     </div>
@@ -2580,8 +2580,9 @@
       { id: '이성호', pw: '1234', role: 'admin' },
       { id: '장종순', pw: '1234', role: 'admin' },
       { id: '박종환', pw: '1234', role: 'admin' },
-      { id: '김승지', pw: '1234', role: 'driver' },
-      { id: '조경찬', pw: '1234', role: 'driver' }
+      { id: '김승지', pw: '1234', role: 'admin' },
+      { id: '현민혁', pw: '1234', role: 'admin' },
+      { id: '이주봉', pw: '1234', role: 'driver' }
     ];
 
     var authUsers = [];
@@ -2621,7 +2622,9 @@
             authUsers = cloudUsers;
             saveAuthUsersLocally();
             renderAdminUserTable();
-            populateBatchDriverSelect();
+            if (typeof renderDriverSelectPopover === 'function') renderDriverSelectPopover();
+            if (typeof populateBatchDriverSelect === 'function') populateBatchDriverSelect();
+            if (typeof updateDriverFilterOptions === 'function') updateDriverFilterOptions();
           }
         }
       } catch (e) {
@@ -3029,7 +3032,9 @@
       document.getElementById('newUserId').value = '';
       document.getElementById('newUserPw').value = '1234';
       renderAdminUserTable();
-      updateDriverFilterOptions();
+      if (typeof renderDriverSelectPopover === 'function') renderDriverSelectPopover();
+      if (typeof populateBatchDriverSelect === 'function') populateBatchDriverSelect();
+      if (typeof updateDriverFilterOptions === 'function') updateDriverFilterOptions();
       showToast('🎉 [' + id + '] 계정이 생성되어 클라우드에 동기화되었습니다!');
     }
 
@@ -3097,10 +3102,18 @@
         return;
       }
       if (!confirm('[' + target.id + '] 계정을 삭제하시겠습니까?')) return;
+      var deletedId = target.id;
       authUsers.splice(idx, 1);
+      if (typeof DRIVER_LIST !== 'undefined' && Array.isArray(DRIVER_LIST)) {
+        var dIdx = DRIVER_LIST.indexOf(deletedId);
+        if (dIdx !== -1) DRIVER_LIST.splice(dIdx, 1);
+      }
       await saveAuthUsersToCloud();
       renderAdminUserTable();
-      showToast('🗑️ [' + target.id + '] 계정이 삭제되었습니다.');
+      if (typeof renderDriverSelectPopover === 'function') renderDriverSelectPopover();
+      if (typeof populateBatchDriverSelect === 'function') populateBatchDriverSelect();
+      if (typeof updateDriverFilterOptions === 'function') updateDriverFilterOptions();
+      showToast('🗑️ [' + deletedId + '] 계정이 삭제되었습니다.');
     }
 
     // ----------------------------------------------------
@@ -3190,7 +3203,7 @@
       }
     }
 
-    const DRIVER_LIST = ['김승지', '조경찬', '박종환', '최두성', '이성호', '장종순', '방문수령', '퀵', '택배'];
+    var DRIVER_LIST = ['방문수령', '퀵', '택배'];
     const CATEGORY_LIST = ['배송', '회수', '배송+회수', '교환출고', '설치', '수령', 'A/S'];
 
     // 시스템 내 모든 등록 유저 및 기사 목록 취합 헬퍼

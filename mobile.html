@@ -93,7 +93,7 @@
           <label class="block text-xs font-bold text-slate-700 mb-1">이름 (아이디)</label>
           <div class="relative">
             <i class="fa-solid fa-user absolute left-3.5 top-3.5 text-slate-400"></i>
-            <input type="text" id="loginUsername" placeholder="예: 김승지, 조경찬" required
+            <input type="text" id="loginUsername" placeholder="예: 김승지, 이주봉" required
                    class="w-full pl-10 pr-3 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:outline-none focus:border-indigo-600">
           </div>
         </div>
@@ -1820,8 +1820,9 @@
       { id: '이성호', pw: '1234', role: 'admin' },
       { id: '장종순', pw: '1234', role: 'admin' },
       { id: '박종환', pw: '1234', role: 'admin' },
-      { id: '김승지', pw: '1234', role: 'driver' },
-      { id: '조경찬', pw: '1234', role: 'driver' }
+      { id: '김승지', pw: '1234', role: 'admin' },
+      { id: '현민혁', pw: '1234', role: 'admin' },
+      { id: '이주봉', pw: '1234', role: 'driver' }
     ];
 
     function togglePasswordVisibility(targetId, btn) {
@@ -2435,7 +2436,7 @@
                 }
                 if (!v.model_name || v.model_name.includes('?')) v.model_name = '스타리아';
                 if (v.default_driver && v.default_driver.includes('?')) {
-                  v.default_driver = (v.vehicle_no === '801부8744') ? '조경찬' : '한민혁';
+                  v.default_driver = (v.vehicle_no === '801부8744') ? '이주봉' : '현민혁';
                 }
                 return v;
               });
@@ -2934,7 +2935,7 @@
 
       try {
         var veh = mobileVehiclesMaster.find(function(v) { return v.vehicle_no === vNo; }) || {};
-        var drvName = getCurrentDriverName() || veh.default_driver || '조경찬';
+        var drvName = getCurrentDriverName() || veh.default_driver || '이주봉';
         var dest = getMobileDriverDestination();
         var destAddr = dest.addr || DEFAULT_GASAN_ORIGIN.addr;
         var destName = dest.name || DEFAULT_GASAN_ORIGIN.name;
@@ -3582,7 +3583,7 @@
         return;
       }
 
-      var drvName = getCurrentDriverName() || '조경찬';
+      var drvName = getCurrentDriverName() || '이주봉';
       var distKm = endKm - startKm;
 
       // 스마트 가드: 추천 거리가 25km 이상인 날, 입력된 거리가 추천 거리와 35km 이상 차이나거나 40% 미만으로 현저히 작으면 확인
@@ -7234,7 +7235,7 @@ function getPastDeliveryInfoForRecord(r) {
         currentMobileVehicleNo = vNo;
       }
       if (urlParams.get('driver') || urlParams.get('user') || urlParams.get('autologin')) {
-        var dName = urlParams.get('driver') || urlParams.get('user') || '조경찬';
+        var dName = urlParams.get('driver') || urlParams.get('user') || '이주봉';
         var users = getAuthUsers();
         var matched = users.find(function(u) { return u.id === dName; }) || { id: dName, role: (dName === '최두성' ? 'admin' : 'driver') };
         currentUser = matched;
