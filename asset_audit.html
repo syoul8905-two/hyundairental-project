@@ -9,6 +9,13 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- Supabase JS v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- 통합 보안 및 개인정보(PIPA) 가드 -->
+<script src="js/auth-guard.js?v=20261106"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    if (window.AuthGuard) window.AuthGuard.ensurePageProtected({ pageName: "스마트 바코드 자산 실사 및 누락 자동 검출" });
+  });
+</script>
   <!-- Lucide Icons -->
   <script src="https://unpkg.com/lucide@latest"></script>
   <!-- SheetJS (Excel) - 다중 CDN 안전 로드 -->

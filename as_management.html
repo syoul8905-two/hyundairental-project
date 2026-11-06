@@ -11,6 +11,13 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <!-- Supabase JS v2 -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- 통합 보안 및 개인정보(PIPA) 가드 -->
+<script src="js/auth-guard.js?v=20261106"></script>
+<script>
+  document.addEventListener("DOMContentLoaded", function() {
+    if (window.AuthGuard) window.AuthGuard.ensurePageProtected({ pageName: "현대렌탈 A/S 및 거래처 인수인계 관리" });
+  });
+</script>
   <!-- SweetAlert2 -->
   <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
   <!-- SheetJS (Excel export) -->
