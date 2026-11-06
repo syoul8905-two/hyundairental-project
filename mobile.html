@@ -1973,6 +1973,13 @@
         if (e && e.preventDefault) e.preventDefault();
         return false;
       }
+      try {
+        if (window.AuthGuard && window.AuthGuard.recordPrivacyAudit) {
+          var cleanP = String(phone).replace(/[^0-9]/g, '');
+          var maskedP = cleanP.length >= 8 ? (cleanP.slice(0, 3) + '-****-' + cleanP.slice(-4)) : '***';
+          window.AuthGuard.recordPrivacyAudit('CONTACT_CALL', { target: name || '고객', phone: maskedP });
+        }
+      } catch(err) {}
       return true;
     }
 
@@ -5041,7 +5048,7 @@ function getPastDeliveryInfoForRecord(r) {
           ${r.memo_full ? `
             <div class="p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 font-medium flex items-start gap-1.5">
               <i class="fa-solid fa-comment-dots text-amber-600 mt-0.5 shrink-0"></i>
-              <span class="break-all">${r.memo_full}</span>
+              <span class="break-all">${window.AuthGuard ? window.AuthGuard.maskSensitivePasscodes(r.memo_full) : r.memo_full}</span>
             </div>
           ` : ''}
 
@@ -5072,7 +5079,7 @@ function getPastDeliveryInfoForRecord(r) {
                     ${p.issue ? `
                       <div class="p-2.5 bg-white/95 rounded-xl border border-amber-200 shadow-2xs">
                         <p class="text-xs font-black text-amber-950 break-all whitespace-pre-line leading-relaxed">
-                          ${p.issue}
+                          ${window.AuthGuard ? window.AuthGuard.maskSensitivePasscodes(p.issue) : p.issue}
                         </p>
                       </div>
                     ` : ''}

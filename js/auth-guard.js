@@ -116,13 +116,19 @@
   }
 
   // 출입문 비밀번호 마스킹 (개인정보보호법 출입보안 조치)
+  function hasPasscode(text) {
+    if (!text || typeof text !== 'string') return false;
+    var regex = /(#\d{3,6}#|\*\d{3,6}\*|비번\s*[:\s]?\s*\d{3,6}|비밀번호\s*[:\s]?\s*\d{3,6}|공동현관\s*[:\s]?\s*[#\*]?\d{3,6}[#\*]?|출입\s*[:\s]?\s*[#\*]?\d{3,6}[#\*]?)/i;
+    return regex.test(text);
+  }
+
   function maskSensitivePasscodes(text) {
     if (!text || typeof text !== 'string') return text || '';
     // 패턴: #1234#, *1234*, 종1234, 비번 1234, 호 1234, 열쇠 등
     var regex = /(#\d{3,6}#|\*\d{3,6}\*|비번\s*[:\s]?\s*\d{3,6}|비밀번호\s*[:\s]?\s*\d{3,6}|공동현관\s*[:\s]?\s*[#\*]?\d{3,6}[#\*]?|출입\s*[:\s]?\s*[#\*]?\d{3,6}[#\*]?)/gi;
     return text.replace(regex, function(match) {
       var safeEncoded = encodeURIComponent(match);
-      return '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs font-mono font-bold cursor-pointer select-none" onclick="window.AuthGuard && window.AuthGuard.togglePasscode(this, \'' + safeEncoded + '\')" title="클릭하여 출입 비밀번호 열람"><i class="fa-solid fa-lock text-[10px] text-amber-600"></i>•••• <span class="text-[9px] text-amber-600 font-sans">열람</span></span>';
+      return '<span class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-900 border border-amber-200 text-xs font-mono font-bold cursor-pointer select-none hover:bg-amber-100 transition" onclick="window.AuthGuard && window.AuthGuard.togglePasscode(this, \'' + safeEncoded + '\')" title="클릭하여 출입 비밀번호 열람"><i class="fa-solid fa-lock text-[10px] text-amber-600"></i>•••• <span class="text-[9px] text-amber-600 font-sans">열람</span></span>';
     });
   }
 
@@ -135,9 +141,53 @@
       } else {
         el.innerHTML = '<i class="fa-solid fa-lock-open text-[10px] text-emerald-600"></i>' + actual + ' <span class="text-[9px] text-slate-500 font-sans">숨김</span>';
         el.dataset.revealed = 'true';
+        // 개인정보 열람 감사 로그 기록
+        recordPrivacyAudit('PASSCODE_REVEAL', { passcodeLength: actual.length });
       }
     } catch (e) {
       console.error(e);
+    }
+  }
+
+  // 개인정보보호법(PIPA) 제29조 접속기록 의무 준수 로그 기록 함수
+  function recordPrivacyAudit(action, details) {
+    try {
+      var client = window.supabaseClient;
+      if (!client && window.supabase && window.SUPABASE_URL && window.SUPABASE_ANON_KEY) {
+        client = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+      }
+      if (!client) return;
+
+      var user = getSessionUser();
+      var userName = user ? (user.name || user.id) : '비인가접속';
+      var today = new Date().toISOString().slice(0, 10);
+      var nowIso = new Date().toISOString();
+
+      var auditPayload = {
+        action: action,
+        user: userName,
+        role: user ? user.role : 'guest',
+        page: (window.location.pathname.split('/').pop() || 'index.html').split('?')[0],
+        timestamp: nowIso,
+        details: details || {}
+      };
+
+      // 비동기 백그라운드 기록 (UI 블로킹 방지)
+      client.from('delivery_schedules').insert([{
+        source_sheet: 'SYSTEM_CONFIG_PRIVACY_AUDIT',
+        delivery_date: today,
+        customer_name: '[감사로그] ' + action,
+        driver_name: userName,
+        category: 'AUDIT',
+        status: 'LOGGED',
+        memo_full: JSON.stringify(auditPayload)
+      }]).then(function(res) {
+        if (res.error) console.warn('[AuthGuard] Audit log recording notice:', res.error.message);
+      }).catch(function(e) {
+        console.warn('[AuthGuard] Audit log exception:', e);
+      });
+    } catch(err) {
+      console.warn('[AuthGuard] recordPrivacyAudit error:', err);
     }
   }
 
@@ -228,6 +278,8 @@
       var overlay = document.getElementById('authGuardPageOverlay');
       if (overlay) overlay.remove();
       console.log('[AuthGuard] Page access granted for:', userId);
+      // 로그인 접속 감사 로그 기록
+      recordPrivacyAudit('LOGIN', { page: (window.location.pathname.split('/').pop() || 'index.html').split('?')[0] });
     } else {
       if (err) {
         err.innerText = '비밀번호(PIN)가 일치하지 않습니다.';
@@ -247,8 +299,10 @@
     verifyPin: verifyPin,
     setSessionUser: setSessionUser,
     clearSession: clearSession,
+    hasPasscode: hasPasscode,
     maskSensitivePasscodes: maskSensitivePasscodes,
     togglePasscode: togglePasscode,
+    recordPrivacyAudit: recordPrivacyAudit,
     ensurePageProtected: ensurePageProtected,
     handlePageLogin: handlePageLogin
   };

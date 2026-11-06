@@ -5723,6 +5723,13 @@
         if (e && e.preventDefault) e.preventDefault();
         return false;
       }
+      try {
+        if (window.AuthGuard && window.AuthGuard.recordPrivacyAudit) {
+          var cleanP = String(phone).replace(/[^0-9]/g, '');
+          var maskedP = cleanP.length >= 8 ? (cleanP.slice(0, 3) + '-****-' + cleanP.slice(-4)) : '***';
+          window.AuthGuard.recordPrivacyAudit('CONTACT_CALL', { target: name || '고객', phone: maskedP });
+        }
+      } catch(err) {}
       return true;
     }
 
@@ -8948,6 +8955,16 @@
       var dateLabel = document.getElementById('calendarDateDisplay') ? document.getElementById('calendarDateDisplay').innerText.replace(/[^\d-]/g, '') : '';
       var driverFilter = document.getElementById('driverFilterSelect') ? document.getElementById('driverFilterSelect').value : 'all';
       var driverLabel = (driverFilter === 'all' || !driverFilter) ? '전체기사' : driverFilter;
+
+      try {
+        if (window.AuthGuard && window.AuthGuard.recordPrivacyAudit) {
+          window.AuthGuard.recordPrivacyAudit('EXCEL_EXPORT', {
+            count: filtered.length,
+            date: dateLabel || '전체',
+            driver: driverLabel
+          });
+        }
+      } catch(err) {}
 
       var excelData = [
         ['No', '상차확인', '배송일자', '담당기사', '방문시간', '구분', '배송방법', '고객사명', '품목 및 수량 (상차 대상)', '배송지 주소', '담당자 연락처', '비고 / 특이사항']
@@ -13273,7 +13290,7 @@ async function unmergeDeliveryBundle(masterId, silent) {
                   <i class="fa-solid fa-triangle-exclamation"></i>
                   <span>현장 기사 특이사항 메모${issueAuthor ? ' (' + issueAuthor + ')' : ''}</span>
                 </div>
-                <div class="font-bold leading-relaxed whitespace-pre-wrap pl-3.5">${issue}</div>
+                <div class="font-bold leading-relaxed whitespace-pre-wrap pl-3.5">${window.AuthGuard ? window.AuthGuard.maskSensitivePasscodes(issue) : issue}</div>
               </div>
             ` : ''}
 
