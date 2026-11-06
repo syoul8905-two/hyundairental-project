@@ -23,6 +23,7 @@
   <script src="js/time-utils.js?v=20261103_v2"></script>
   <script src="js/geo-utils.js?v=20261103_v2"></script>
   <script src="js/audit-service.js?v=20261103_v2"></script>
+  <script src="js/odometer_ai_recognizer.js"></script>
   <script src="js/schedule-service.js?v=20261103_v2"></script>
   <script src="js/vehicle-service.js?v=20261103_v2"></script>
   <script src="js/vehicle-tracker-ui.js?v=20261103_v2"></script>
@@ -112,6 +113,12 @@
           </button>
         </div>
       </div>
+
+      <!-- AI Odometer Settings Button -->
+      <button type="button" onclick="OdometerAI.openSettingsModal()" title="계기판 AI 인식 설정 (Gemini/Grok)" class="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-xl transition flex items-center gap-1.5 shadow-xs text-xs border border-indigo-200 cursor-pointer">
+        <i class="fa-solid fa-camera text-indigo-600"></i>
+        <span class="hidden sm:inline">AI 계기판 설정</span>
+      </button>
 
       <!-- Refresh Button -->
       <button onclick="loadVehicleData(false)" class="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition flex items-center gap-1 shadow-xs text-xs">
@@ -595,9 +602,17 @@
             <label class="block text-xs font-bold text-slate-700">
               <i class="fa-solid fa-gauge-high text-emerald-600 mr-1"></i>최종 계기판 Km (운행 종료)
             </label>
-            <span class="text-[10px] text-slate-500 font-mono">출발: <b id="quickCloseStartKmText" class="text-slate-700">145,038</b> km</span>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] text-slate-500 font-mono">출발: <b id="quickCloseStartKmText" class="text-slate-700">145,038</b> km</span>
+              <button type="button" id="btnQuickCloseOdometerCamera" onclick="triggerQuickCloseOdometerCamera()" class="text-[10px] font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 px-2 py-0.5 rounded-lg shadow-xs transition flex items-center gap-1 cursor-pointer active:scale-95" title="계기판 사진 파일 선택 판독">
+                <i class="fa-solid fa-camera text-[9px]"></i>
+                <span>AI 사진 판독</span>
+              </button>
+            </div>
           </div>
           <input type="number" id="quickCloseEndKm" min="0" oninput="calcQuickCloseMileage()" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold font-mono text-right focus:border-emerald-500 outline-none" placeholder="종료 계기판">
+          <input type="file" id="quickCloseOdometerInput" accept="image/*" class="hidden" onchange="handleQuickCloseOdometerUpload(event)">
+          <div id="quickCloseOdometerAIStatus" class="hidden p-2 rounded-xl text-xs font-bold transition flex items-center justify-between mt-1 shadow-2xs"></div>
           <div class="flex items-center justify-between text-xs font-mono pt-1 border-t border-slate-200/60">
             <span class="text-slate-500">당일 총 주행거리:</span>
             <span class="font-black text-indigo-600" id="quickCloseDistText">0 km</span>
@@ -3086,6 +3101,86 @@
         var ch = Math.floor(targetM / 60) % 24;
         var cm = targetM % 60;
         arriveInput.value = String(ch).padStart(2, '0') + ':' + String(cm).padStart(2, '0');
+      }
+    }
+
+
+    // ==========================================
+    // 🚗 계기판 AI 사진 자동인식 컨트롤러 (PC 관제)
+    // ==========================================
+    function triggerQuickCloseOdometerCamera() {
+      if (!window.OdometerAI) {
+        alert('AI 판독 모듈 로딩 중입니다. 잠시 후 다시 시도해 주세요.');
+        return;
+      }
+      var config = OdometerAI.getConfig();
+      if (!config.hasKey) {
+        OdometerAI.openSettingsModal();
+        return;
+      }
+      var input = document.getElementById('quickCloseOdometerInput');
+      if (input) {
+        input.value = '';
+        input.click();
+      }
+    }
+
+    async function handleQuickCloseOdometerUpload(event) {
+      var files = event.target.files;
+      if (!files || files.length === 0) return;
+      var file = files[0];
+
+      var btn = document.getElementById('btnQuickCloseOdometerCamera');
+      var statusEl = document.getElementById('quickCloseOdometerAIStatus');
+      var origHtml = btn ? btn.innerHTML : '';
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin text-[9px]"></i><span>판독중</span>';
+      }
+      if (statusEl) {
+        statusEl.className = 'p-2 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 flex items-center justify-between block';
+        statusEl.innerHTML = '<span class="flex items-center gap-1.5"><i class="fa-solid fa-spinner fa-spin text-indigo-600"></i> AI가 계기판 사진을 정밀 판독하고 있습니다 (약 1초)...</span>';
+      }
+
+      try {
+        var startKmEl = document.getElementById('quickCloseStartKmText');
+        var startKm = Number(startKmEl ? (startKmEl.dataset.startKm || 0) : 0);
+        var res = await OdometerAI.recognize(file, startKm);
+
+        if (res && res.odometer_km) {
+          document.getElementById('quickCloseEndKm').value = res.odometer_km;
+          calcQuickCloseMileage();
+
+          if (statusEl) {
+            statusEl.className = 'p-2 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center justify-between block animate-fade-in';
+            statusEl.innerHTML = `
+              <span class="flex items-center gap-1.5">
+                <i class="fa-solid fa-circle-check text-emerald-600"></i>
+                <span>AI 판독 성공: <b class="font-mono text-emerald-700 font-black">${res.odometer_km.toLocaleString()} km</b></span>
+              </span>
+              <span class="text-[10px] bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-mono font-bold">${res.provider === 'grok' ? 'xAI Grok' : 'Gemini'}</span>
+            `;
+          }
+        }
+      } catch (err) {
+        console.error('Quick close odometer recognition failed:', err);
+        if (err.message === 'NO_API_KEY') {
+          OdometerAI.openSettingsModal();
+        } else {
+          if (statusEl) {
+            statusEl.className = 'p-2 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 flex items-center justify-between block';
+            statusEl.innerHTML = `<span class="flex items-center gap-1.5"><i class="fa-solid fa-triangle-exclamation text-rose-600"></i> ${err.message || '판독 실패'}</span>`;
+          }
+          alert('⚠️ ' + (err.message || '계기판 숫자를 인식하지 못했습니다.'));
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = origHtml;
+        }
+        event.target.value = '';
+        file = null; // Zero Storage
       }
     }
 
