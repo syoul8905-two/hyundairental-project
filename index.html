@@ -2844,38 +2844,42 @@
     // User Menu & Settings Modals Controllers
     // ----------------------------------------------------
     function initTestServerMenuUI() {
-      var isLocal = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      var isLocal = (window.location.port === '8080' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('10.') || window.location.hostname.startsWith('192.168.'));
+      var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.innerWidth <= 768);
       var label = document.getElementById('testServerMenuLabel');
       var badge = document.getElementById('testServerMenuBadge');
       var link = document.getElementById('menuItemTestServer');
       if (!label || !badge || !link) return;
 
       if (isLocal) {
-        label.innerText = '테스트 서버 (현재 환경)';
+        label.innerText = '운영 서버(Vercel)로 이동';
         badge.className = 'text-[9px] px-1.5 py-0.2 bg-emerald-100 text-emerald-800 font-black rounded-full border border-emerald-300 flex items-center gap-1';
         badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span> 8080 LIVE';
         link.href = 'https://hyundairental-project-1.vercel.app/';
-        link.title = '현재 로컬 테스트 서버입니다. 클릭 시 운영 서버(Vercel)로 이동할 수 있습니다.';
+        link.title = '현재 테스트 서버입니다. 클릭 시 운영 서버(Vercel)로 이동합니다.';
       } else {
         label.innerText = '테스트 서버';
+        var targetUrl = isMobile ? 'http://10.10.2.70:8080/' : 'http://localhost:8080/';
         badge.className = 'text-[9px] px-1.5 py-0.2 bg-purple-100 text-purple-700 font-black rounded-full border border-purple-200';
-        badge.innerText = '로컬 8080';
-        link.href = 'http://localhost:8080/';
-        link.title = '로컬 테스트 서버(http://localhost:8080/)를 새 창으로 엽니다.';
+        badge.innerText = isMobile ? '사내망 8080' : '로컬 8080';
+        link.href = targetUrl;
+        link.title = '테스트 서버(' + targetUrl + ')를 새 창으로 엽니다.';
       }
     }
 
     function handleTestServerMenuClick(e) {
-      var isLocal = (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+      var isLocal = (window.location.port === '8080' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname.startsWith('10.') || window.location.hostname.startsWith('192.168.'));
+      var isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (window.innerWidth <= 768);
       toggleUserMenu(false);
       if (isLocal) {
-        if (confirm('💡 현재 접속 중인 화면이 [로컬 테스트 서버 (포트 8080)]입니다.\n\n운영 메인 서버(Vercel)로 새 창에서 이동하시겠습니까?')) {
+        if (confirm('💡 현재 접속 중인 화면이 [테스트 서버 (포트 8080)]입니다.\n\n운영 메인 서버(Vercel)로 이동하시겠습니까?')) {
           window.open('https://hyundairental-project-1.vercel.app/', '_blank');
         }
         e.preventDefault();
       } else {
+        var targetUrl = isMobile ? 'http://10.10.2.70:8080/' : 'http://localhost:8080/';
         if (typeof showToast === 'function') {
-          showToast('🧪 로컬 테스트 서버(http://localhost:8080/)로 이동합니다.');
+          showToast('🧪 테스트 서버(' + targetUrl + ')로 이동합니다.');
         }
       }
     }
