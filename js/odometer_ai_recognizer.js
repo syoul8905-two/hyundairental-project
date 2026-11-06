@@ -8,20 +8,12 @@
 
   var STORAGE_KEY_PROVIDER = 'AI_ODOMETER_PROVIDER';
   var STORAGE_KEY_API_KEY = 'AI_ODOMETER_API_KEY';
-  // GitHub Secret Scanner 차단 방지를 위한 안전 디코더 (평문 AIzaSy 노출 방지)
-  function safeDecode(encoded) {
-    if (!encoded) return '';
-    try { return atob(encoded).trim(); } catch(e) { return encoded.trim(); }
-  }
-  var DEFAULT_API_KEY_B64 = ''; // 새 키 등록 시 Base64로 안전 보관
 
   var OdometerAI = {
-    // 1. 설정 조회
+    // 1. 설정 조회 (보안 원칙: 기기 내부 localStorage에서만 안전하게 조회, Git 코드 내 비밀정보 영구 배제)
     getConfig: function() {
       var provider = localStorage.getItem(STORAGE_KEY_PROVIDER) || 'gemini';
-      var storedKey = localStorage.getItem(STORAGE_KEY_API_KEY);
-      var defaultKey = safeDecode(DEFAULT_API_KEY_B64);
-      var apiKey = (storedKey && storedKey.trim().length > 0 ? storedKey : defaultKey).trim();
+      var apiKey = (localStorage.getItem(STORAGE_KEY_API_KEY) || '').trim();
       return {
         provider: provider, // 'gemini' | 'grok'
         apiKey: apiKey,
