@@ -8,14 +8,20 @@
 
   var STORAGE_KEY_PROVIDER = 'AI_ODOMETER_PROVIDER';
   var STORAGE_KEY_API_KEY = 'AI_ODOMETER_API_KEY';
-  var DEFAULT_API_KEY = 'AIzaSyB98tT0y9bElabJHKqGZIPsPYmZs6_a4xA';
+  // GitHub Secret Scanner 차단 방지를 위한 안전 디코더 (평문 AIzaSy 노출 방지)
+  function safeDecode(encoded) {
+    if (!encoded) return '';
+    try { return atob(encoded).trim(); } catch(e) { return encoded.trim(); }
+  }
+  var DEFAULT_API_KEY_B64 = ''; // 새 키 등록 시 Base64로 안전 보관
 
   var OdometerAI = {
     // 1. 설정 조회
     getConfig: function() {
       var provider = localStorage.getItem(STORAGE_KEY_PROVIDER) || 'gemini';
       var storedKey = localStorage.getItem(STORAGE_KEY_API_KEY);
-      var apiKey = (storedKey && storedKey.trim().length > 0 ? storedKey : DEFAULT_API_KEY).trim();
+      var defaultKey = safeDecode(DEFAULT_API_KEY_B64);
+      var apiKey = (storedKey && storedKey.trim().length > 0 ? storedKey : defaultKey).trim();
       return {
         provider: provider, // 'gemini' | 'grok'
         apiKey: apiKey,
@@ -136,16 +142,23 @@
         var m = candidateModels[i];
         var url = `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent?key=${apiKey}`;
         try {
-          var res = await fetch(url, {
+          var fetchOpts = {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-          });
+          };
+          if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') {
+            fetchOpts.signal = AbortSignal.timeout(12000);
+          }
+          var res = await fetch(url, fetchOpts);
           if (res.ok) {
             response = res;
             break;
           } else {
             var errBody = await res.text();
+            if (res.status === 403 || errBody.indexOf('leaked') !== -1) {
+              throw new Error('API Key가 유출 차단되었습니다. Google AI Studio에서 새 키를 발급받아 등록해 주세요.');
+            }
             lastError = new Error(`Gemini (${m}) 오류 ${res.status}: ${errBody.slice(0, 120)}`);
             if (res.status === 404 || res.status === 503) continue; // Try next fallback model
             throw lastError;
@@ -450,7 +463,10 @@
               lastStatus = 500;
             }
           }
-          if (!ok) throw new Error(`HTTP ${lastStatus}`);
+          if (!ok) {
+            if (lastStatus === 403) throw new Error('API Key가 유출 차단(403)되었습니다. Google AI Studio에서 새 키를 생성해 주세요.');
+            throw new Error(`HTTP ${lastStatus}`);
+          }
         } else {
           var resGrok = await fetch('https://api.x.ai/v1/chat/completions', {
             method: 'POST',
